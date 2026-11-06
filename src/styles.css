@@ -1,0 +1,126 @@
+@import "@xterm/xterm/css/xterm.css";
+
+/* ---- tile container ---- */
+.vivarium-embed { width: 100%; height: 100%; }
+.canvas-node-content.vivarium-embed { overflow: hidden; }
+.vivarium-term {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+	padding: 6px 4px 4px 8px;
+	background: var(--background-primary);
+	/* Layout & paint of one tile never affect the rest of the canvas. */
+	contain: strict;
+}
+.markdown-embed .vivarium-embed, .internal-embed.vivarium-embed { height: 420px; display: block; }
+.vivarium-view { padding: 0 !important; }
+.vivarium-term .xterm { height: 100%; }
+.vivarium-term .xterm-viewport { background-color: transparent !important; }
+.vivarium-term .xterm-viewport::-webkit-scrollbar { width: 6px; }
+.vivarium-term .xterm-viewport::-webkit-scrollbar-thumb { background: var(--background-modifier-border); border-radius: 3px; }
+
+/* ---- overlays ---- */
+.vivarium-term-overlay {
+	position: absolute; inset: auto 8px 8px auto; z-index: 5;
+	display: flex; gap: 8px; align-items: center;
+	padding: 4px 6px 4px 10px; border-radius: var(--radius-m);
+	background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-smaller); color: var(--text-muted);
+}
+.vivarium-term-error { padding: 16px; color: var(--text-error); font-size: var(--font-ui-small); }
+
+/* ---- pickers & toolbar ---- */
+/* Canvas fills toolbar icons (for its page-shaped icons), which hides the >_ glyph. */
+.canvas-card-menu .vivarium-card-menu-button svg { fill: none !important; }
+.vivarium-suggest-sub { color: var(--text-faint); }
+.vivarium-programs-input { width: 100%; min-width: 320px; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+.vivarium-drag-ghost {
+	position: fixed; z-index: var(--layer-dragged-item); pointer-events: none;
+	width: 120px; height: 75px; transform: translate(-50%, -50%);
+	border: 2px dashed var(--interactive-accent); border-radius: var(--radius-m);
+	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+
+/* ---- app tiles (streamed native windows) ---- */
+.vivarium-window { position: relative; width: 100%; height: 100%; background: var(--background-secondary); contain: strict; overflow: hidden; }
+.vivarium-window-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vivarium-window-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; pointer-events: none; }
+.vivarium-window-status {
+	position: absolute; inset: 0; display: flex; gap: 10px; align-items: center; justify-content: center;
+	color: var(--text-muted); font-size: var(--font-ui-small); background: var(--background-secondary);
+}
+.vivarium-window-toolbar {
+	position: absolute; top: 6px; right: 6px; z-index: 5; display: flex; gap: 2px; padding: 2px;
+	border-radius: var(--radius-m); background: color-mix(in srgb, var(--background-primary) 85%, transparent);
+	opacity: 0; transition: opacity 120ms;
+}
+.canvas-node.is-focused .vivarium-window-toolbar, .vivarium-view .vivarium-window:hover .vivarium-window-toolbar { opacity: 1; }
+.vivarium-window.is-handed-off::after {
+	content: "Open in full screen — press ⌃⌘F there to bring it back";
+	position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+	background: color-mix(in srgb, var(--background-primary) 70%, transparent); color: var(--text-muted); font-size: var(--font-ui-small);
+}
+.vivarium-window-banner {
+	position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 6; display: flex; gap: 8px; align-items: center;
+	padding: 4px 6px 4px 10px; border-radius: var(--radius-m); font-size: var(--font-ui-smaller); color: var(--text-muted);
+	background: color-mix(in srgb, var(--background-primary) 90%, transparent); border: 1px solid var(--background-modifier-border);
+}
+.vivarium-window-banner span { flex: 1; }
+.vivarium-window.is-resizing .vivarium-window-canvas { object-fit: fill; }
+/* while the real window covers the tile, hide our chrome under it */
+.vivarium-window.is-engaged .vivarium-window-toolbar { display: none; }
+
+/* ---- semantic zoom: labels that stay readable when zoomed out (see zoom.ts) ---- */
+.vivarium-zoom-label { display: none; }
+.vivarium-zoomed-out .vivarium-zoom-label {
+	display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+	position: absolute; inset: 0; padding: 0.6em 0.8em; z-index: 2;
+	align-content: center; text-align: left; overflow-wrap: anywhere; line-height: 1.15;
+	color: var(--text-normal); font-weight: var(--font-semibold);
+	/* screen-pixel size: target px × (1/scale), but never more than the card can hold */
+	font-size: min(calc(var(--vivarium-label-px, 15px) * var(--vivarium-inv-scale, 1)), var(--vivarium-max-label, 40px));
+}
+.vivarium-zoom-label[data-level="1"] { --vivarium-label-px: 26px; font-weight: var(--font-bold); }
+.vivarium-zoom-label[data-level="2"] { --vivarium-label-px: 21px; font-weight: var(--font-bold); }
+.vivarium-zoom-label[data-level="3"] { --vivarium-label-px: 17px; }
+.vivarium-zoom-label[data-level="4"], .vivarium-zoom-label[data-level="5"], .vivarium-zoom-label[data-level="6"] { --vivarium-label-px: 15px; }
+.vivarium-zoom-label[data-level="7"] { --vivarium-label-px: 13px; font-weight: var(--font-normal); color: var(--text-muted); }
+/* file cards: Canvas's own (canvas-scaled) placeholder text is replaced by our label */
+.vivarium-zoomed-out .canvas-node-placeholder { color: transparent; }
+/* group titles: Canvas keeps them screen-sized only up to a 4× multiplier (25% zoom), then they
+   shrink. Use our uncapped multiplier with Canvas's own layout (above the group, ellipsized to
+   the group's width). */
+.vivarium-zoomed-out .canvas-group-label {
+	top: calc(-1 * var(--size-4-1) * var(--vivarium-inv-scale, 1));
+	transform: translateY(-100%) scale(var(--vivarium-inv-scale, 1));
+	max-width: calc(100% / var(--vivarium-inv-scale, 1));
+}
+/* extreme zoom-out: group titles move to an overlay above all cards (zoom.ts), inside their group */
+.vivarium-zoomed-veryfar .canvas-group-label { visibility: hidden; }
+.vivarium-group-overlays { position: absolute; left: 0; top: 0; z-index: 999999; pointer-events: none; display: none; }
+.vivarium-zoomed-veryfar .vivarium-group-overlays { display: block; }
+.vivarium-group-overlay {
+	position: absolute; left: 0; top: 0; box-sizing: border-box; overflow: hidden;
+	padding: calc(var(--size-4-2) * var(--vivarium-inv-scale, 1));
+}
+.vivarium-group-overlay span {
+	display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	font-size: calc(22px * var(--vivarium-inv-scale, 1)); line-height: 1.2; font-weight: var(--font-semibold);
+	padding: 0.15em 0.4em; border-radius: var(--radius-s); color: var(--text-normal);
+	background: color-mix(in srgb, var(--background-primary) 80%, transparent);
+}
+/* very far out: cards are specks — group titles (which Canvas keeps screen-sized) carry the overview */
+.vivarium-zoomed-far .vivarium-zoom-label { display: none !important; }
+.vivarium-zoomed-out .vivarium-has-label .canvas-icon-placeholder { display: none; }
+
+/* ---- web tiles (real browser in the canvas) ---- */
+.vivarium-web { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; background: var(--background-primary); contain: strict; }
+.vivarium-web-bar { display: flex; align-items: center; gap: 2px; padding: 3px 4px; border-bottom: 1px solid var(--background-modifier-border); background: var(--background-secondary); flex: 0 0 auto; }
+.vivarium-web-bar .clickable-icon { padding: 3px; }
+.vivarium-web-bar .clickable-icon.is-disabled { opacity: 0.35; pointer-events: none; }
+.vivarium-web-url { flex: 1; min-width: 0; height: 24px; font-size: var(--font-ui-smaller); padding: 0 8px; border-radius: var(--radius-s); }
+.vivarium-web-view { flex: 1 1 auto; width: 100%; min-height: 0; display: flex; background: white; }
+/* off-screen or tiny: don't paint the page (it keeps running) */
+.vivarium-web.is-dormant .vivarium-web-view { visibility: hidden; }
+.vivarium-web:fullscreen { width: 100vw; height: 100vh; }

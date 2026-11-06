@@ -1,0 +1,7 @@
+{
+ "nodes": [
+  {"id": "welcome", "type": "text", "x": -300, "y": -110, "width": 600, "height": 220,
+   "text": "# Vivarium\nRight-click empty space → **Add program…**, use the `>_` button below, or ⌘P → *Vivarium: Add program to canvas…*\n\nType a command (`htop`, `claude`), a URL (`localhost:3000`) or an app name."}
+ ],
+ "edges": []
+}

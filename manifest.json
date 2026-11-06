@@ -1,0 +1,9 @@
+{
+  "id": "vivarium",
+  "name": "Vivarium",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Live program tiles on Canvas: terminals, coding agents and dev servers that keep running, backed by tmux.",
+  "author": "Daniel Bosch",
+  "isDesktopOnly": true
+}

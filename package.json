@@ -1,0 +1,23 @@
+{
+  "name": "obsidian-vivarium",
+  "version": "0.1.0",
+  "description": "Live program tiles (terminals, agents, dev servers) for Obsidian Canvas, backed by tmux.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "build:helper": "cd helper/macos && swift build -c release"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.24.2",
+    "obsidian": "^1.14.4",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0"
+  }
+}

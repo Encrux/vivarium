@@ -1,0 +1,455 @@
+/**
+ * TerminalSurface: one xterm.js view onto one tmux pane.
+ *
+ * Performance model (the reason this file is shaped the way it is):
+ *  - Visible  → output is written straight into xterm.
+ *  - Hidden   → (off-screen, canvas zoomed out past its breakpoint, background tab)
+ *               raw bytes are buffered in memory, nothing is parsed or rendered.
+ *  - Stale    → the hidden buffer exceeded its cap: we drop it and tell tmux to stop
+ *               sending output for this pane altogether. A hidden noisy build costs ~0.
+ *  - On show  → flush the small buffer, or (if stale) repaint from a tmux snapshot.
+ * The xterm instance itself survives hide/show, so panning back is instant.
+ */
+import { Terminal, ITheme } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import type { VivariumCore } from "./core";
+import type { PaneInfo } from "./tmux";
+import type { Launch } from "./core";
+
+const HIDDEN_BUFFER_CAP = 256 * 1024;
+const HIDE_GRACE_MS = 150;
+
+type Mode = "live" | "hidden" | "stale";
+
+export interface SurfaceOptions {
+	/** How to start the program if the tmux window has to be (re)created. */
+	launch: Launch;
+	cwd: string;
+	tileId: string;
+}
+
+export class TerminalSurface {
+	readonly el: HTMLElement;
+	private term: Terminal;
+	private fit = new FitAddon();
+	private pane: PaneInfo | null = null;
+	private unsubscribe: (() => void) | null = null;
+	private mode: Mode = "hidden";
+	private buffer: { data: Uint8Array; seq: number }[] = [];
+	private bufferBytes = 0;
+	private needsRepaint = true;
+	private visible = false;
+	private hideTimer: number | null = null;
+	private io: IntersectionObserver;
+	private ro: ResizeObserver;
+	private resizeRaf: number | null = null;
+	private lastSize = "";
+	private disposed = false;
+	private overlayEl: HTMLElement | null = null;
+	private repainting: Promise<void> | null = null;
+	private unregister: () => void;
+	private offZoom: () => void = () => {};
+	/** On screen per IntersectionObserver; `visible` additionally requires readable size. */
+	private onScreen = false;
+	private tiny = false;
+
+	constructor(private core: VivariumCore, parent: HTMLElement, private opts: SurfaceOptions) {
+		this.el = parent.createDiv({ cls: "vivarium-term" });
+		const s = core.settings;
+		this.term = new Terminal({
+			fontFamily: core.fontFamily(),
+			fontSize: s.fontSize,
+			lineHeight: 1.1,
+			scrollback: s.scrollback,
+			cursorBlink: true,
+			allowProposedApi: false,
+			macOptionIsMeta: s.optionIsMeta,
+			theme: core.theme(),
+			// DOM renderer (default): crisp at every canvas zoom level (CSS transform scales vectors),
+			// and no WebGL context limit (~16 per page) to run into with many tiles.
+		});
+		this.term.loadAddon(this.fit);
+		this.term.open(this.el);
+		this.patchMouseForCssScale();
+		this.isolateEvents();
+
+		this.term.onData((d) => {
+			if (this.pane) this.core.hub.sendInput(this.pane.paneId, d).catch(() => {});
+		});
+		this.term.onBinary((d) => {
+			if (this.pane) this.core.hub.sendInput(this.pane.paneId, d).catch(() => {});
+		});
+
+		this.io = new IntersectionObserver((entries) => {
+			const e = entries[entries.length - 1];
+			this.onScreen = e.isIntersecting && this.el.isConnected;
+			this.setVisible(this.onScreen && !this.tiny);
+		});
+		// Zoomed far out the text is unreadable: freeze on the last picture, buffer output.
+		// (no layout reads here: this runs on every zoom frame)
+		this.offZoom = core.zoom?.onZoom((scale) => {
+			const tiny = scale * this.core.settings.fontSize < 4;
+			if (tiny === this.tiny) return;
+			this.tiny = tiny;
+			this.setVisible(this.onScreen && !this.tiny);
+		}) ?? (() => {});
+		this.io.observe(this.el);
+		this.ro = new ResizeObserver(() => this.scheduleFit());
+		this.ro.observe(this.el);
+		this.el.addEventListener("focusin", () => this.claimSize());
+
+		this.unregister = core.registerSurface(this);
+	}
+
+	get tileId() {
+		return this.opts.tileId;
+	}
+
+	async start(): Promise<void> {
+		// Wait until we're laid out so a new program starts at the tile's real size (no initial
+		// reflow, no zsh "%" partial-line marker). Existing tmux windows don't care.
+		if (!this.core.hub.getPane(this.opts.tileId)) await this.waitForLayout();
+		if (this.disposed) return;
+		if (this.el.clientWidth > 10) this.fit.fit();
+		const { cols, rows } = this.proposeSize();
+		try {
+			this.pane = await this.core.hub.ensureWindow(this.opts.tileId, this.opts.launch, this.opts.cwd, cols, rows);
+		} catch (e) {
+			this.showOverlay(`Could not start tmux: ${(e as Error).message}`, false);
+			return;
+		}
+		this.needsRepaint = true;
+		this.updateDeadState();
+		if (this.visible) this.goLive();
+	}
+
+	/** Called by core when tmux reports pane changes (death, respawn, close). */
+	onPanesChanged() {
+		const p = this.core.hub.getPane(this.opts.tileId);
+		if (!p && this.pane) {
+			// Window was killed (e.g. from the CLI or `exit` with remain-on-exit off).
+			this.detachStream();
+			this.pane = null;
+			this.showOverlay("Program closed", true);
+			return;
+		}
+		if (p && this.pane && p.paneId !== this.pane.paneId) {
+			this.detachStream();
+			this.pane = p;
+			this.needsRepaint = true;
+			if (this.visible) this.goLive();
+		}
+		this.updateDeadState();
+	}
+
+	private updateDeadState() {
+		const p = this.pane && this.core.hub.getPane(this.opts.tileId);
+		if (p?.dead) this.showOverlay("Program exited", true);
+		else if (p) this.hideOverlay();
+	}
+
+	// ---------- visibility & streaming ----------
+
+	private setVisible(v: boolean) {
+		if (v === this.visible) return;
+		this.visible = v;
+		if (this.hideTimer !== null) {
+			window.clearTimeout(this.hideTimer);
+			this.hideTimer = null;
+		}
+		if (v) {
+			this.goLive();
+		} else {
+			// Small grace period so a quick pan across doesn't churn subscriptions.
+			this.hideTimer = window.setTimeout(() => {
+				this.hideTimer = null;
+				if (!this.visible && this.mode === "live") this.mode = "hidden";
+			}, HIDE_GRACE_MS);
+		}
+	}
+
+	private goLive() {
+		if (!this.pane || this.disposed) return;
+		this.scheduleFit();
+		if (!this.unsubscribe) {
+			this.mode = "hidden"; // buffer while we (maybe) repaint
+			this.unsubscribe = this.core.hub.subscribe(this.pane.paneId, (d, seq) => this.onOutput(d, seq));
+		}
+		if (this.mode === "stale") this.needsRepaint = true;
+		if (this.needsRepaint) {
+			this.repaint();
+			return;
+		}
+		this.flushBuffer();
+		this.mode = "live";
+	}
+
+	private onOutput(data: Uint8Array, seq: number) {
+		if (this.mode === "live") {
+			this.term.write(data);
+			return;
+		}
+		if (this.mode === "stale") return;
+		this.buffer.push({ data, seq });
+		this.bufferBytes += data.length;
+		if (this.bufferBytes > HIDDEN_BUFFER_CAP && !this.repainting) {
+			// Too much happened while hidden: stop the stream entirely and repaint on show.
+			this.buffer = [];
+			this.bufferBytes = 0;
+			this.mode = "stale";
+			this.needsRepaint = true;
+			this.detachStream();
+		}
+	}
+
+	private flushBuffer() {
+		if (!this.buffer.length) return;
+		const chunks = this.buffer;
+		this.buffer = [];
+		this.bufferBytes = 0;
+		for (const c of chunks) this.term.write(c.data);
+	}
+
+	private detachStream() {
+		this.unsubscribe?.();
+		this.unsubscribe = null;
+	}
+
+	/** Repaint xterm from a tmux snapshot (screen + history + terminal modes). */
+	private repaint() {
+		if (this.repainting || !this.pane) return;
+		const pane = this.pane;
+		this.repainting = (async () => {
+			try {
+				this.mode = "hidden"; // buffer until the snapshot is painted
+				// Subscribe before snapshotting so nothing falls in a gap; output already contained
+				// in the snapshot (seq <= snap.seq) is dropped afterwards.
+				if (!this.unsubscribe) this.unsubscribe = this.core.hub.subscribe(pane.paneId, (d, seq) => this.onOutput(d, seq));
+				// Make the pane match this tile's size *before* snapshotting, otherwise a 30-row
+				// snapshot written into a 24-row xterm scrolls the screen out of view.
+				await this.syncSizeNow();
+				if (this.disposed || this.pane !== pane) return;
+				const snap = await this.core.hub.capture(pane.paneId, this.core.settings.restoreLines);
+				if (this.disposed || this.pane !== pane) return;
+				const st = snap.state;
+				this.buffer = this.buffer.filter((c) => c.seq > snap.seq);
+				this.bufferBytes = this.buffer.reduce((n, c) => n + c.data.length, 0);
+				let out = "\x1bc"; // full reset
+				if (st.alternate) {
+					// Normal screen first (it reappears when the app exits), with its saved cursor.
+					if (snap.normalText) out += snap.normalText + `\x1b[${st.savedY + 1};${st.savedX + 1}H`;
+					out += "\x1b[?1049h\x1b[H";
+				}
+				out += snap.text;
+				out += `\x1b[${st.cursorY + 1};${st.cursorX + 1}H`;
+				if (st.cursorKeys) out += "\x1b[?1h";
+				if (st.keypad) out += "\x1b=";
+				if (st.mouseStandard) out += "\x1b[?1000h";
+				if (st.mouseButton) out += "\x1b[?1002h";
+				if (st.mouseAny) out += "\x1b[?1003h";
+				if (st.mouseSgr) out += "\x1b[?1006h";
+				if (!st.cursorVisible) out += "\x1b[?25l";
+				this.term.write(out);
+				this.needsRepaint = false;
+				if (this.visible) {
+					this.flushBuffer();
+					this.mode = "live";
+				} else {
+					this.mode = "hidden";
+				}
+			} catch (e) {
+				console.warn("[vivarium] repaint failed", e);
+			} finally {
+				this.repainting = null;
+			}
+		})();
+	}
+
+	// ---------- sizing ----------
+
+	private waitForLayout(): Promise<void> {
+		return new Promise((resolve) => {
+			const t0 = performance.now();
+			const check = () => {
+				if (this.disposed || (this.el.isConnected && this.el.clientWidth > 10 && this.el.clientHeight > 10) || performance.now() - t0 > 2000) resolve();
+				else window.requestAnimationFrame(check);
+			};
+			check();
+		});
+	}
+
+	private proposeSize(): { cols: number; rows: number } {
+		const dims = this.fit.proposeDimensions();
+		const cols = dims && isFinite(dims.cols) ? dims.cols : 100;
+		const rows = dims && isFinite(dims.rows) ? dims.rows : 30;
+		return { cols: Math.max(20, cols), rows: Math.max(5, rows) };
+	}
+
+	private scheduleFit() {
+		if (this.resizeRaf !== null) return;
+		this.resizeRaf = window.requestAnimationFrame(() => {
+			this.resizeRaf = null;
+			if (!this.visible || this.disposed || !this.el.isConnected) return;
+			if (this.el.clientWidth < 10 || this.el.clientHeight < 10) return;
+			this.fit.fit();
+			this.sendSizeIfOwner();
+		});
+	}
+
+	/** Fit now and wait until tmux has the new size (used before snapshots). */
+	private async syncSizeNow() {
+		if (!this.pane || !this.el.isConnected || this.el.clientWidth < 10 || this.el.clientHeight < 10) return;
+		this.fit.fit();
+		const owner = this.core.sizeOwners.get(this.pane.paneId);
+		if (owner && owner !== this && owner.isVisible()) return;
+		this.core.sizeOwners.set(this.pane.paneId, this);
+		const key = `${this.term.cols}x${this.term.rows}`;
+		if (key === this.lastSize) return;
+		this.lastSize = key;
+		await this.core.hub.resize(this.pane, this.term.cols, this.term.rows).catch(() => {});
+	}
+
+	private claimSize() {
+		if (!this.pane) return;
+		this.core.sizeOwners.set(this.pane.paneId, this);
+		this.lastSize = "";
+		this.sendSizeIfOwner();
+	}
+
+	private sendSizeIfOwner() {
+		if (!this.pane) return;
+		const owner = this.core.sizeOwners.get(this.pane.paneId);
+		if (owner && owner !== this && owner.isVisible()) return;
+		this.core.sizeOwners.set(this.pane.paneId, this);
+		const key = `${this.term.cols}x${this.term.rows}`;
+		if (key === this.lastSize) return;
+		this.lastSize = key;
+		this.core.hub.resize(this.pane, this.term.cols, this.term.rows).catch(() => {});
+	}
+
+	isVisible() {
+		return this.visible;
+	}
+
+	// ---------- canvas integration details ----------
+
+	/**
+	 * Canvas scales nodes with a CSS transform. xterm maps mouse position → cell using
+	 * unscaled cell sizes, so selection/clicks drift when zoomed. Un-scale the coordinates.
+	 */
+	private patchMouseForCssScale() {
+		const ms = (this.term as any)._core?._mouseService;
+		if (!ms || typeof ms.getCoords !== "function") return;
+		const unscale = (ev: { clientX: number; clientY: number }, element: HTMLElement) => {
+			const rect = element.getBoundingClientRect();
+			const sx = element.offsetWidth ? rect.width / element.offsetWidth : 1;
+			const sy = element.offsetHeight ? rect.height / element.offsetHeight : 1;
+			if (Math.abs(sx - 1) < 0.001 && Math.abs(sy - 1) < 0.001) return ev;
+			return { clientX: rect.left + (ev.clientX - rect.left) / sx, clientY: rect.top + (ev.clientY - rect.top) / sy };
+		};
+		const getCoords = ms.getCoords.bind(ms);
+		ms.getCoords = (ev: any, el: HTMLElement, ...rest: any[]) => getCoords(unscale(ev, el), el, ...rest);
+		const report = ms.getMouseReportCoords?.bind(ms);
+		if (report) ms.getMouseReportCoords = (ev: any, el: HTMLElement) => report(unscale(ev, el), el);
+	}
+
+	/** Keep keystrokes/clipboard from reaching canvas shortcuts (Space=pan, Backspace=delete, paste=new card). */
+	private isolateEvents() {
+		const stop = (e: Event) => e.stopPropagation();
+		const keyStop = (e: KeyboardEvent) => {
+			// Let Cmd-chords through so Obsidian hotkeys (Cmd+P, Cmd+W, …) keep working.
+			if (e.metaKey && !["c", "v", "x", "a"].includes(e.key.toLowerCase())) return;
+			e.stopPropagation();
+		};
+		this.el.addEventListener("keydown", keyStop);
+		this.el.addEventListener("keyup", keyStop);
+		this.el.addEventListener("keypress", stop);
+		for (const t of ["copy", "paste", "cut"]) this.el.addEventListener(t, stop);
+		// Pointer events only reach us when the card is focused (otherwise Canvas's content
+		// blocker sits on top). Keep them: a text selection must not drag the card. The card
+		// can still be moved by its label or border.
+		this.el.addEventListener("pointerdown", stop);
+		// Only when focused do we own the wheel; otherwise the content blocker lets the canvas pan.
+		this.el.addEventListener("wheel", (e) => {
+			if (this.el.contains(document.activeElement)) e.stopPropagation();
+		}, { passive: true });
+	}
+
+	focus() {
+		this.term.focus();
+	}
+
+	blur() {
+		this.term.blur();
+	}
+
+	applyAppearance() {
+		this.term.options.theme = this.core.theme();
+		this.term.options.fontFamily = this.core.fontFamily();
+		this.term.options.fontSize = this.core.settings.fontSize;
+		this.term.options.macOptionIsMeta = this.core.settings.optionIsMeta;
+		this.lastSize = "";
+		this.scheduleFit();
+	}
+
+	private showOverlay(msg: string, restart: boolean) {
+		this.hideOverlay();
+		const o = (this.overlayEl = this.el.createDiv({ cls: "vivarium-term-overlay" }));
+		o.createSpan({ text: msg });
+		if (restart) {
+			const b = o.createEl("button", { text: "Restart", cls: "mod-cta" });
+			b.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.restart();
+			});
+		}
+	}
+
+	private hideOverlay() {
+		this.overlayEl?.remove();
+		this.overlayEl = null;
+	}
+
+	async restart() {
+		this.hideOverlay();
+		const p = this.core.hub.getPane(this.opts.tileId);
+		if (p) {
+			await this.core.hub.respawn(this.opts.tileId, this.opts.launch, this.opts.cwd);
+			this.term.reset();
+			this.lastSize = "";
+			this.scheduleFit();
+		} else {
+			this.detachStream();
+			this.pane = null;
+			this.term.reset();
+			await this.start();
+		}
+	}
+
+	dispose() {
+		if (this.disposed) return;
+		this.disposed = true;
+		if (this.hideTimer !== null) window.clearTimeout(this.hideTimer);
+		if (this.resizeRaf !== null) window.cancelAnimationFrame(this.resizeRaf);
+		this.io.disconnect();
+		this.ro.disconnect();
+		this.offZoom();
+		this.detachStream();
+		if (this.pane && this.core.sizeOwners.get(this.pane.paneId) === this) this.core.sizeOwners.delete(this.pane.paneId);
+		this.unregister();
+		this.term.dispose();
+		this.el.remove();
+	}
+}
+
+export function themeFromCss(el: HTMLElement): ITheme {
+	const cs = getComputedStyle(el);
+	const v = (n: string, fb: string) => cs.getPropertyValue(n).trim() || fb;
+	return {
+		background: v("--background-primary", "#1e1e1e"),
+		foreground: v("--text-normal", "#dcddde"),
+		cursor: v("--text-accent", "#7f6df2"),
+		cursorAccent: v("--background-primary", "#1e1e1e"),
+		selectionBackground: v("--text-selection", "rgba(127,109,242,0.35)"),
+	};
+}

@@ -1,0 +1,167 @@
+#!/usr/bin/env node
+// vivarium — control Obsidian Vivarium tiles from any terminal (or from an agent running inside one).
+//
+// Canvas ops (add/note/move/focus/rm/ls) go to the Obsidian plugin over ~/.vivarium/<vault>.sock.
+// Program I/O (send/read/keys) goes straight to tmux, so it works even when Obsidian is closed.
+// Inside a Vivarium tile, $VIVARIUM_TILE is that tile's id and is the default for --near / <id>.
+"use strict";
+const net = require("net");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { execFileSync } = require("child_process");
+
+const SOCKET = process.env.VIVARIUM_TMUX_SOCKET || "vivarium";
+const SESSION = "vivarium";
+const HERE = process.env.VIVARIUM_TILE || "";
+
+const HELP = `vivarium — drive program tiles on an Obsidian canvas
+
+  vivarium ls                              list cards on open canvases (programs marked *)
+  vivarium add [opts] [--] <command…>      add a program tile (empty command = shell)
+      --title T  --cwd DIR  --size WxH  --at X,Y
+      --near ID  (default: the tile you're in)   --no-edge   --label TEXT
+  vivarium note [--near ID] [--color 1-6] <text…>   add a text card
+  vivarium send [ID] <text…>               type text + Enter into a program (--no-enter to omit)
+  vivarium keys [ID] <tmux-key…>           send keys, e.g. vivarium keys t123 C-c   or  Up Enter
+  vivarium read [ID] [--lines N]           print a program's screen (+N lines of history)
+  vivarium move ID X,Y [WxH]               move/resize a tile
+  vivarium focus ID                        zoom the canvas to a tile
+  vivarium rm ID                           stop the program and remove its tile
+  vivarium attach [ID]                     attach this terminal to a tile's program
+
+  Options: --vault NAME (when several vaults run Vivarium)   --json (raw output)
+  Tile ids look like t3k9x2a; \`vivarium ls\` shows them. Inside a tile, $VIVARIUM_TILE = its id.`;
+
+function parse(argv) {
+	const flags = {}, pos = [];
+	for (let i = 0; i < argv.length; i++) {
+		const a = argv[i];
+		if (a === "--") { pos.push(...argv.slice(i + 1)); break; }
+		if (a.startsWith("--")) {
+			const k = a.slice(2);
+			if (["no-edge", "no-enter", "json", "help"].includes(k)) flags[k] = true;
+			else flags[k] = argv[++i];
+		} else pos.push(a);
+	}
+	return { flags, pos };
+}
+
+function die(msg) { process.stderr.write(`vivarium: ${msg}\n`); process.exit(1); }
+
+function sockPath(vault) {
+	const dir = path.join(os.homedir(), ".vivarium");
+	vault = vault || process.env.VIVARIUM_VAULT; // set inside tiles: talk to the tile's own vault
+	let socks = [];
+	try { socks = fs.readdirSync(dir).filter((f) => f.endsWith(".sock")); } catch {}
+	if (vault) return path.join(dir, vault.replace(/[^\w.-]+/g, "_") + ".sock");
+	if (socks.length === 1) return path.join(dir, socks[0]);
+	if (!socks.length) die("Obsidian with the Vivarium plugin doesn't seem to be running (no socket in ~/.vivarium).");
+	die(`several vaults are running Vivarium (${socks.map((s) => s.slice(0, -5)).join(", ")}); pass --vault NAME`);
+}
+
+function rpc(vault, req) {
+	return new Promise((resolve, reject) => {
+		const s = net.createConnection(sockPath(vault));
+		let buf = "";
+		s.on("connect", () => s.write(JSON.stringify(req) + "\n"));
+		s.on("data", (d) => {
+			buf += d;
+			const nl = buf.indexOf("\n");
+			if (nl < 0) return;
+			s.end();
+			const res = JSON.parse(buf.slice(0, nl));
+			res.ok ? resolve(res) : reject(new Error(res.error));
+		});
+		s.on("error", (e) => reject(new Error(e.code === "ECONNREFUSED" || e.code === "ENOENT" ? "Obsidian isn't running Vivarium for this vault" : e.message)));
+	});
+}
+
+function findTmux() {
+	for (const p of ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]) if (fs.existsSync(p)) return p;
+	return "tmux";
+}
+const TMUX = findTmux();
+function tmux(...args) {
+	try { return execFileSync(TMUX, ["-L", SOCKET, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
+	catch (e) { die((e.stderr || e.message).trim()); }
+}
+const target = (id) => `${SESSION}:${id}`;
+const isId = (s) => /^t[a-z0-9]{4,}$/.test(s || "");
+
+function takeId(pos) {
+	if (isId(pos[0])) return pos.shift();
+	if (HERE) return HERE;
+	die("which tile? pass an id (see `vivarium ls`)");
+}
+
+(async () => {
+	const [cmd, ...rest] = process.argv.slice(2);
+	const { flags, pos } = parse(rest);
+	if (!cmd || cmd === "help" || flags.help || cmd === "-h" || cmd === "--help") return console.log(HELP);
+	const out = (res, human) => console.log(flags.json ? JSON.stringify(res, null, 2) : human(res));
+	const xy = (s) => { const [x, y] = String(s).split(",").map(Number); return { x, y }; };
+	const wh = (s) => { const [width, height] = String(s).split("x").map(Number); return { width, height }; };
+	try {
+		switch (cmd) {
+			case "ls": {
+				const res = await rpc(flags.vault, { op: "list" });
+				return out(res, (r) => r.nodes.map((n) => {
+					const where = `${Math.round(n.x)},${Math.round(n.y)} ${Math.round(n.width)}x${Math.round(n.height)}`;
+					if (n.kind === "program") return `* ${n.id}  ${n.title}${n.running ? "" : " (exited)"}  [${n.command || "shell"}]  ${where}  ${n.canvas}${n.id === HERE ? "  <- you" : ""}`;
+					return `  ${n.kind.padEnd(7)} ${(n.text || n.file || n.url || n.label || "").replace(/\s+/g, " ").slice(0, 60)}  ${where}  ${n.canvas}`;
+				}).join("\n") || "(no cards)");
+			}
+			case "add": {
+				const req = { op: "add", command: pos.join(" "), title: flags.title, cwd: flags.cwd || (HERE ? process.cwd() : undefined), near: flags.near || HERE || undefined, edge: !flags["no-edge"], label: flags.label };
+				if (flags.at) Object.assign(req, xy(flags.at));
+				if (flags.size) Object.assign(req, wh(flags.size));
+				const res = await rpc(flags.vault, req);
+				return out(res, (r) => r.id);
+			}
+			case "note": {
+				const res = await rpc(flags.vault, { op: "note", text: pos.join(" "), near: flags.near || HERE || undefined, color: flags.color, edge: !flags["no-edge"], label: flags.label });
+				return out(res, (r) => r.nodeId);
+			}
+			case "send": {
+				const id = takeId(pos);
+				tmux("send-keys", "-t", target(id), "-l", pos.join(" "));
+				if (!flags["no-enter"]) tmux("send-keys", "-t", target(id), "Enter");
+				return;
+			}
+			case "keys": {
+				const id = takeId(pos);
+				tmux("send-keys", "-t", target(id), ...pos);
+				return;
+			}
+			case "read": {
+				const id = takeId(pos);
+				const n = parseInt(flags.lines || "0", 10);
+				process.stdout.write(tmux("capture-pane", "-p", "-J", "-t", target(id), ...(n ? ["-S", String(-n)] : [])).replace(/\n+$/, "\n"));
+				return;
+			}
+			case "move": {
+				const id = takeId(pos);
+				const req = { op: "move", id, ...(pos[0] ? xy(pos[0]) : {}), ...(pos[1] ? wh(pos[1]) : {}) };
+				return out(await rpc(flags.vault, req), (r) => `${r.x},${r.y} ${r.width}x${r.height}`);
+			}
+			case "focus":
+				await rpc(flags.vault, { op: "focus", id: takeId(pos) });
+				return;
+			case "rm": {
+				const id = takeId(pos);
+				await rpc(flags.vault, { op: "rm", id }).catch(() => tmux("kill-window", "-t", target(id)));
+				return;
+			}
+			case "attach": {
+				const id = takeId(pos);
+				const r = require("child_process").spawnSync(TMUX, ["-L", SOCKET, "attach", "-t", target(id)], { stdio: "inherit" });
+				process.exit(r.status ?? 0);
+			}
+			default:
+				die(`unknown command "${cmd}" (try: vivarium help)`);
+		}
+	} catch (e) {
+		die(e.message);
+	}
+})();

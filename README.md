@@ -1,127 +1,174 @@
-# Campus for Obsidian
+<div align="center">
 
-Live program tiles on Obsidian Canvas: shells, Claude Code, Codex, dev servers, `htop`.
-They keep running when you pan away, close the canvas or quit Obsidian. Inspired by
-FlutterFlow's Campus, built on Obsidian's own Canvas.
+# Vivarium
 
-Desktop only (macOS/Linux). Needs `tmux` (`brew install tmux`).
+**Live programs on your Obsidian Canvas.**<br>
+Terminals, coding agents, dev servers and web pages as tiles next to your notes. They keep running
+while you pan away, close the canvas or quit Obsidian.
 
-## Install (local)
+<img src="docs/media/hero.gif" alt="Adding an htop terminal and boesch.dev as live tiles on an Obsidian canvas" width="900">
+
+</div>
+
+---
+
+## What it is
+
+Obsidian Canvas is a great place to *think*. Vivarium makes it a place to *work*: put the programs
+you're working with next to the notes about them, on one infinite plane.
+
+| Tile | What it is | Feels |
+|---|---|---|
+| **Terminal** | Any command (`zsh`, `claude`, `codex`, `npm run dev`, `htop`) in a real terminal, backed by tmux | Native: keystroke → echo in **0.6 ms** (p50) |
+| **Web** | A real browser page inside the card (`localhost:3000`, docs, dashboards) | Native: direct input, scales with the canvas, Obsidian keeps focus |
+| **App window** *(macOS, experimental)* | Any app's window as a live preview; click it to work in the real window | Live preview at 60 fps; native once clicked |
+
+Plus **semantic zoom**: zoom out and your workspace stays readable. Card headlines and group titles
+are kept at screen size, like labels on a map, while live tiles freeze on their last picture.
+
+## Highlights
+
+### Agents can arrange the canvas
+
+Every tile knows who it is (`$VIVARIUM_TILE`), so a coding agent running in one can open programs
+next to itself, leave notes, and read or type into other tiles:
+
+<img src="docs/media/agents.gif" alt="An agent in a terminal tile runs vivarium add and vivarium note; a clock tile and a note card appear next to it, connected by arrows" width="900">
 
 ```sh
+vivarium add -- npm run dev            # new tile beside me, connected with an arrow
+vivarium note "Plan: 1) … 2) …"        # text card beside me
+vivarium read t3k9x2a --lines 50       # what does that program show?
+vivarium send t3k9x2a "npm test"       # type a command (+ Enter)
+```
+
+Telling an agent *"you're in a Vivarium tile, run `vivarium help`"* is enough for it to use this.
+
+### Big workspaces stay readable
+
+Canvas unmounts card content below ~30% zoom to stay fast, and text cards go blank. Vivarium
+replaces them with each card's first heading at a readable size, then hands over to group titles
+when cards become specks:
+
+<img src="docs/media/zoom.gif" alt="Zooming out of a workspace: card headlines stay readable, then group titles; zooming back in shows a live terminal and web page" width="900">
+
+### Things keep running
+
+- **Terminals live in tmux.** Quit Obsidian, reopen it: every program is still running, with its
+  scrollback, its screen (including full-screen apps like `vim` and `htop`) and its cursor.
+- **Attach from anywhere:** `tmux -L vivarium attach -t vivarium:<id>`, or `vivarium attach`.
+- **Web tiles remember their page** and keep their logins (own browser profile).
+
+## Install
+
+Vivarium isn't in the community plugin directory (yet). Build it from source:
+
+**Requirements:** Obsidian 1.5+ (desktop), Node 20+, `tmux` (`brew install tmux` / `apt install tmux`).
+App tiles additionally need macOS 14+ and the Xcode Command Line Tools.
+
+```sh
+git clone git@github.com:Encrux/vivarium.git && cd vivarium
 npm install
-npm run build                     # builds into dev-vault/.obsidian/plugins/campus
-ln -s "$PWD/dev-vault/.obsidian/plugins/campus" "<your vault>/.obsidian/plugins/campus"
+npm run build:helper   # macOS only: the native helper for app tiles (optional)
+npm run build          # → dev-vault/.obsidian/plugins/vivarium/
+
+# link it into your vault and enable "Vivarium" under Settings → Community plugins
+ln -s "$PWD/dev-vault/.obsidian/plugins/vivarium" "<your vault>/.obsidian/plugins/vivarium"
+
+# optional: the CLI for agents
+ln -s "$PWD/bin/vivarium" /opt/homebrew/bin/vivarium
 ```
 
-Then enable **Campus** under Settings → Community plugins. To put the CLI on your PATH:
+## Using it
 
-```sh
-ln -s "$PWD/bin/campus" /opt/homebrew/bin/campus
-```
-
-## Adding programs
-
-All of these open the same picker. Type to filter the presets, or type any command and press ↵ to run it:
+**Add a tile.** All of these open the same picker. Type a command, a URL or an app name:
 
 | Where | How |
 |---|---|
-| Command palette | **Campus: Add program to canvas…** (placed at the viewport center) |
-| Right-click on empty canvas | **Add program…** in Canvas's own menu (placed where you clicked) |
-| Canvas toolbar | the `>_` button. Click it to open the picker, or drag it to where the tile should go |
-| Hotkeys | each preset gets a command (e.g. **Add Claude Code to canvas**) you can bind a key to |
+| Right-click on empty canvas | **Add program…**, next to Canvas's own *Add card / note / media* |
+| Canvas toolbar | the `>_` button: click it to open the picker, drag it to drop a tile where you release |
+| Command palette | **Vivarium: Add program to canvas…** |
+| Hotkeys | each preset (Shell, Claude Code, Codex, htop, …) has its own command you can bind |
 
-Presets, the default working directory and the font are in the plugin settings.
+**Work in it.** Click a tile to select it, then click or type inside it. Unselected tiles never take
+your scroll wheel, so panning a crowded canvas stays smooth. Each tile is a small file in `Vivarium/`
+(`.term`, `.web`, `.window`). Open it in a tab, embed it in a note with `![[htop.term]]`, or delete it to
+stop the program.
 
-## Using tiles
-
-- **Click** a tile to type into it. **Click the canvas** to leave. While a tile is focused it gets
-  your keys, wheel and mouse (Space doesn't pan, Backspace doesn't delete the card). `⌘` shortcuts
-  such as ⌘P still reach Obsidian.
-- **Move** a focused tile by its label or border. Text selection inside a focused tile works at any zoom.
-- **Unfocused** tiles never steal the wheel, so you can pan across a crowded canvas freely.
-- Each tile is a small `.term` file in `Campus/` (settings → Tile folder). Open it in a tab, or
-  embed it in a note with `![[Claude Code.term]]`. Every view shows the same live program.
-- Right-click a tile for **Restart program**, **Stop program** and **Copy tmux attach command**.
-  Deleting the `.term` file stops its program. **Stop programs whose tile file was deleted** cleans up leftovers.
-- With *Keep a shell after the program exits* on (the default), the command is typed into your
-  login shell: Ctrl+C gets you a prompt in the same directory, and ↑ runs the command again.
-
-## Agents (`campus` CLI)
-
-Inside a tile, `$CAMPUS_TILE` is that tile's id, so an agent can arrange the canvas around itself:
-
-```sh
-campus add -- npm run dev             # new tile beside me, connected with an arrow
-campus note "Plan: 1) … 2) …"         # text card beside me
-campus read t3k9x2a --lines 50        # what does that program show?
-campus send t3k9x2a "npm test"        # type a command (+ Enter)
-campus keys t3k9x2a C-c               # send keys
-campus ls | move | focus | rm | attach
-```
-
-Telling an agent "you're in a Campus tile; run `campus help`" is enough for it to start using this.
-Canvas operations go through a private socket (`~/.campus/<vault>.sock`, mode 0600). Program I/O
-goes straight to tmux, so `read`, `send` and `attach` work even while Obsidian is closed.
+**App tiles (macOS).** Pick an app (Safari, Simulator, Figma, …) in the picker. The real window
+lives on an invisible virtual display and is streamed into the tile. Click the tile and the real
+window comes forward over it, so you use the actual app. Click the canvas to send it back. This
+needs **Screen Recording** and **Accessibility** for Obsidian (System Settings → Privacy & Security).
+Prefer **web tiles** for anything that runs in a browser: they're instant and never switch focus.
 
 ## How it works
 
 ```
-Canvas file card ──► TermEmbed ──► TerminalSurface (xterm.js, DOM renderer)
-                                          │  keystrokes: send-keys -H        ▲ %output (raw bytes)
-                                          ▼                                  │
-                           TmuxHub: ONE `tmux -C` control-mode client  ──────┘
-                                          │
-                      tmux server (-L campus), session "campus", one window per tile
+Canvas file card ─► Embed ─┬─► Terminal tile  xterm.js (DOM renderer) ◄─────────┐
+                           │                       │ keys (send-keys)              │ raw bytes
+                           │                       ▼                               │
+                           │      ONE tmux control-mode client (tmux -C) ─────────┘
+                           │                       │
+                           │      tmux server (-L vivarium), one window per tile
+                           │
+                           ├─► Web tile       <webview> (Chromium, in-process with Obsidian)
+                           │
+                           └─► App tile       WebCodecs H.264 decoder ◄── native helper (Swift)
+                                                   ScreenCaptureKit → VideoToolbox (hardware)
+                                                   windows parked on a CGVirtualDisplay "stage"
 ```
 
-- **No native modules.** tmux control mode replaces node-pty: output arrives as escaped bytes on
-  one pipe, and resizing is a command.
-- **Persistence for free.** Programs live in the tmux server. On reopen a tile is repainted from a
-  tmux snapshot: history, the screen, full-screen apps like vim, less and TUIs (including the screen
-  underneath them), cursor and key modes.
-- **Sizes are owned by the plugin** (`window-size manual`): one tile, one size, no fighting with
-  other clients.
+**Performance is a feature.** Every tile only costs something while you can see it:
 
-### Performance model
+| State | Terminal | App window | Web |
+|---|---|---|---|
+| visible | output written to xterm | stream at 60 fps (selected) / 8 fps | live |
+| off-screen / zoomed far out | raw bytes buffered, nothing parsed or painted; a noisy hidden tile gets tmux output switched off entirely | stream stopped, last frame kept | not painted, keeps running |
+| back on screen | flush the buffer, or repaint from a tmux snapshot | resume | instant |
 
-Tiles only cost something while you can see them:
+Measured with **30 terminals each printing ~20 coloured lines/s** (Obsidian 1.15, MacBook Air):
 
-| State | What happens |
+| | |
 |---|---|
-| visible | output is written into xterm |
-| off-screen, zoomed out past Canvas's breakpoint, or a background tab | raw bytes are buffered (cap 256 KB); nothing is parsed or rendered |
-| hidden and noisy (cap exceeded) | buffer dropped, and tmux stops sending that pane's output entirely |
-| shown again | flush the small buffer, or repaint from a tmux snapshot |
+| close-up / panning across the grid / zoomed to fit | **60 fps**, p95 ≈ 17 ms, no long tasks |
+| keystroke → echo | **p50 0.6 ms**, p95 11 ms |
+| semantic zoom on 160 cards: panning / zooming through all levels | **60 fps** / ~60 fps |
 
-- **One process for all tiles.** All tiles share one tmux client, so 30 tiles mean one extra process.
-- **DOM renderer.** Text stays crisp at every canvas zoom, and there's no WebGL context limit.
-- **Contained layout.** Each tile uses `contain: strict`, so its layout and paint stay isolated from the rest of the canvas.
+## Platform status
 
-Measured with 30 tiles, each printing about 20 coloured lines/s (Obsidian 1.15, M-series MacBook Air):
+| | macOS | Linux |
+|---|---|---|
+| Terminal tiles | ✅ | should work (tmux + Node); untested |
+| Web tiles | ✅ | should work; untested |
+| App tiles | ✅ experimental | planned: virtual display per app via Xpra |
+| `vivarium` CLI | ✅ | should work; untested |
 
-| Scenario | Result |
-|---|---|
-| close-up (4 live) | 60 fps, p95 17.4 ms, 0 long tasks |
-| panning across the grid at 1:1 | 60 fps, p95 17.2 ms |
-| zoomed to fit (all 30 on screen, below the breakpoint) | 60 fps |
-| zoom sweep through the breakpoint | about 37 fps. The same sweep over 30 plain markdown cards gives about 22 fps, so the cost is Canvas mounting content, not the tiles |
-| keystroke → echo | p50 0.6 ms, p95 11 ms |
-
-## Sharing
-
-Live terminals are local by nature. For collaboration, the [Relay](https://relay.md) plugin syncs
-`.canvas` files with live cursors. Collaborators see the layout and notes, and each person's
-programs run on their own machine. To show someone a running program, `tmux -L campus attach -t campus:<id>`
-over SSH works today.
+Windows isn't supported (no tmux).
 
 ## Caveats
 
-- Uses undocumented Obsidian internals (`embedRegistry`, `canvas.showCreationMenu`, `canvas:node-menu`,
-  `importData`). An Obsidian update can break them; each touch point is small and isolated in `main.ts` and `control.ts`.
-- Tested on Obsidian 1.15.0 with tmux 3.8 on macOS.
+- **Uses Obsidian internals** that plugins can't reach through the public API: `embedRegistry`,
+  `canvas.showCreationMenu`, `canvas:node-menu`, `importData`. An Obsidian update can break them.
+  Each touch point is small and isolated.
+- **Web tiles run Obsidian's bundled Chromium,** which only updates when you install a new Obsidian
+  release, not with in-app updates. Keep that in mind before browsing arbitrary sites in them.
+- **App tiles rely on a private macOS API** (`CGVirtualDisplay`, also used by DeskPad and
+  BetterDisplay). Using an app still switches focus to it, as macOS requires.
+- **Granting Accessibility to Obsidian** lets any Obsidian plugin post input to other apps.
 
 ## Development
 
-`npm run dev` rebuilds on change into `dev-vault/`. Open `dev-vault` as a vault and toggle the
-plugin to reload it. `npm run build` typechecks and builds once.
+```sh
+npm run dev            # rebuild on change into dev-vault/
+npm run build          # typecheck + build once
+npm run build:helper   # rebuild the Swift helper (macOS)
+```
+
+Open `dev-vault/` as a vault, or symlink the plugin folder into another vault. Toggle the plugin to
+reload it. The helper speaks a small JSON-lines / framed-binary protocol over stdin/stdout
+(`helper/macos/Sources/VivariumHelper/Protocol.swift`), so a Linux helper can slot in behind the
+same plugin code.
+
+---
+
+<sub>Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>, built on Obsidian's own Canvas.</sub>

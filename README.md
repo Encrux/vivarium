@@ -31,9 +31,12 @@ are kept at screen size, like labels on a map, while live tiles freeze on their 
 ### Agents can arrange the canvas
 
 Every tile knows who it is (`$VIVARIUM_TILE`), so a coding agent running in one can open programs
-next to itself, leave notes, and read or type into other tiles:
+next to itself, leave notes, and read or type into other tiles. Below, Claude Code (Haiku) gets a
+single prompt: *"start this project's dev server in a new tile next to you, then leave a one-line note
+saying what you started"*. It reads `vivarium help`, opens the server in a tile beside itself and
+leaves the note. This is a real, unedited run.
 
-<img src="docs/media/agents.gif" alt="An agent in a terminal tile runs vivarium add and vivarium note; a clock tile and a note card appear next to it, connected by arrows" width="900">
+<img src="docs/media/agents.gif" alt="Claude Code in a terminal tile runs vivarium help, vivarium add and vivarium note; a dev server tile and a note card appear next to it, connected by arrows" width="900">
 
 ```sh
 vivarium add -- npm run dev            # new tile beside me, connected with an arrow

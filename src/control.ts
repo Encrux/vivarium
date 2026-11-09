@@ -212,7 +212,7 @@ export class ControlServer {
 	/** Stop the program, remove the card and delete the tile file. */
 	async op_rm(req: Req) {
 		const t = await this.findTile(req.id);
-		await this.plugin.core.hub.killWindow(req.id);
+		await this.plugin.core.stopTile(req.id);
 		if (t) {
 			t.canvas.removeNode(t.node);
 			t.canvas.requestSave();

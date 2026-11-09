@@ -22,8 +22,11 @@ const HIDE_GRACE_MS = 150;
 type Mode = "live" | "hidden" | "stale";
 
 export interface SurfaceOptions {
-	/** How to start the program if the tmux window has to be (re)created. */
+	/** How to (re)start the program fresh (Restart program). */
 	launch: Launch;
+	/** How to start it if its tmux window doesn't exist yet: fresh, or restored after a reboot. */
+	startLaunch?: Launch;
+	startCwd?: string;
 	cwd: string;
 	tileId: string;
 }
@@ -113,7 +116,7 @@ export class TerminalSurface {
 		if (this.el.clientWidth > 10) this.fit.fit();
 		const { cols, rows } = this.proposeSize();
 		try {
-			this.pane = await this.core.hub.ensureWindow(this.opts.tileId, this.opts.launch, this.opts.cwd, cols, rows);
+			this.pane = await this.core.hub.ensureWindow(this.opts.tileId, this.opts.startLaunch ?? this.opts.launch, this.opts.startCwd ?? this.opts.cwd, cols, rows);
 		} catch (e) {
 			this.showOverlay(`Could not start tmux: ${(e as Error).message}`, false);
 			return;
@@ -131,6 +134,15 @@ export class TerminalSurface {
 			this.detachStream();
 			this.pane = null;
 			this.showOverlay("Program closed", true);
+			return;
+		}
+		if (p && !this.pane && !this.disposed) {
+			// the program came back (e.g. restored after a restart): attach to it
+			this.pane = p;
+			this.hideOverlay();
+			this.needsRepaint = true;
+			if (this.visible) this.goLive();
+			this.updateDeadState();
 			return;
 		}
 		if (p && this.pane && p.paneId !== this.pane.paneId) {

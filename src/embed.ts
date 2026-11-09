@@ -15,7 +15,10 @@ async function mount(core: VivariumCore, parent: HTMLElement, file: TFile): Prom
 		parent.createDiv({ cls: "vivarium-term-error", text: "tmux not found. Install it (brew install tmux) or set its path in Vivarium settings." });
 		return null;
 	}
-	const surface = new TerminalSurface(core, parent, { tileId: spec.id, launch: core.launch(spec), cwd: core.resolveCwd(spec.cwd) });
+	const start = core.keeper.launchFor(spec); // fresh, or restored after a reboot
+	const surface = new TerminalSurface(core, parent, {
+		tileId: spec.id, launch: core.launch(spec), cwd: core.resolveCwd(spec.cwd), startLaunch: start.launch, startCwd: start.cwd,
+	});
 	surface.start();
 	return surface;
 }

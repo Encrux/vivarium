@@ -5,6 +5,7 @@ import { findTmux, TmuxHub } from "./tmux";
 import { TerminalSurface, themeFromCss } from "./terminal";
 import { HelperClient, helperBinary } from "./helper";
 import type { SemanticZoom } from "./zoom";
+import { SessionKeeper } from "./keeper";
 
 export interface Program {
 	name: string;
@@ -78,6 +79,8 @@ export class VivariumCore {
 	/** Native helper for app tiles; null when not built for this platform. */
 	helper: HelperClient | null = null;
 	zoom: SemanticZoom | null = null;
+	/** Remembers what tiles run, so a reboot/crash can restore them (see keeper.ts). */
+	readonly keeper = new SessionKeeper(this);
 	private claims = new Map<number, unknown>(); // windowId → surface showing it
 	/** .window file path → the real window it shows (for "delete tile → give the window back"). */
 	readonly attachedWindows = new Map<string, { windowId: number; pid: number }>();
@@ -238,7 +241,13 @@ export class VivariumCore {
 	}
 
 	async killTile(spec: TileSpec) {
-		await this.hub.killWindow(spec.id);
+		await this.stopTile(spec.id);
+	}
+
+	/** Stop a tile's program on purpose: it also won't be restored after a restart. */
+	async stopTile(tileId: string) {
+		this.keeper.forget(tileId);
+		await this.hub.killWindow(tileId);
 	}
 
 	notice(msg: string) {
@@ -290,6 +299,7 @@ export class VivariumCore {
 	}
 
 	dispose() {
+		this.keeper.stop();
 		if (this.stateTimer !== null) {
 			window.clearTimeout(this.stateTimer);
 			this.app.saveLocalStorage("vivarium-tile-state", this.stateCache);

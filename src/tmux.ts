@@ -294,6 +294,30 @@ export class TmuxHub {
 		this.onPanesChanged();
 	}
 
+	get connected(): boolean {
+		return this.proc !== null;
+	}
+
+	/** Per-tile process facts for the SessionKeeper (one tmux round trip). */
+	async listPaneInfo(): Promise<{ tileId: string; paneId: string; panePid: number; cwd: string; command: string; dead: boolean; historySize: number; cursorY: number; activity: string }[]> {
+		const lines = await this.cmd(
+			`list-windows -t ${tq(SESSION)} -F ${tq("#{window_name}\t#{pane_id}\t#{pane_pid}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_dead}\t#{history_size}\t#{cursor_y}\t#{window_activity}")}`,
+		);
+		return lines
+			.map((l) => l.split("\t"))
+			.filter((a) => a[0] && a[0] !== HUB_WINDOW)
+			.map(([tileId, paneId, pid, cwd, command, dead, hist, cy, act]) => ({
+				tileId, paneId, panePid: +pid, cwd, command, dead: dead === "1", historySize: +hist, cursorY: +cy, activity: act,
+			}));
+	}
+
+	/** Recent output with colours, wrapped lines joined (so it reflows at any width). */
+	async captureForSnapshot(paneId: string, lines: number): Promise<string> {
+		const out = await this.cmd(`capture-pane -p -e -J -t ${tq(paneId)} -S ${-lines}`);
+		while (out.length && !out[out.length - 1].replace(/\x1b\[[0-9;]*m/g, "").trim()) out.pop();
+		return out.join("\n") + "\n";
+	}
+
 	getPane(tileId: string): PaneInfo | undefined {
 		return this.panes.get(tileId);
 	}
@@ -303,7 +327,18 @@ export class TmuxHub {
 	}
 
 	/** Create the tmux window for a tile if it doesn't exist yet. */
-	async ensureWindow(tileId: string, launch: Launch, cwd: string, cols: number, rows: number): Promise<PaneInfo> {
+	private creating = new Map<string, Promise<PaneInfo>>();
+
+	/** One window per tile, even if a canvas and the startup restore ask at the same moment. */
+	ensureWindow(tileId: string, launch: Launch, cwd: string, cols: number, rows: number): Promise<PaneInfo> {
+		const inflight = this.creating.get(tileId);
+		if (inflight) return inflight;
+		const p = this.createWindow(tileId, launch, cwd, cols, rows).finally(() => this.creating.delete(tileId));
+		this.creating.set(tileId, p);
+		return p;
+	}
+
+	private async createWindow(tileId: string, launch: Launch, cwd: string, cols: number, rows: number): Promise<PaneInfo> {
 		await this.ensureConnected();
 		let pane = this.panes.get(tileId);
 		if (pane) return pane;

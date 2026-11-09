@@ -102,6 +102,8 @@ export default class VivariumPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.hookCanvases()));
 		this.app.workspace.onLayoutReady(() => {
 			this.hookCanvases();
+			// After a reboot/crash: bring back what was running (Claude Code resumes its own session).
+			this.core.keeper.restoreAll().catch((e) => console.warn("[vivarium] restore", e)).finally(() => this.core.keeper.start());
 			// If the plugin was (re)enabled with canvases open, their .term cards show the old
 			// (or no) embed; rebuild them with ours.
 			this.forEachTermNode((n) => {
@@ -133,7 +135,7 @@ export default class VivariumPlugin extends Plugin {
 			this.app.vault.on("delete", (f) => {
 				if (!(f instanceof TFile) || f.extension !== TILE_EXT) return;
 				const id = this.idCache.get(f.path);
-				if (id) this.core.hub.killWindow(id).catch(() => {});
+				if (id) this.core.stopTile(id).catch(() => {});
 			}),
 		);
 		this.registerEvent(this.app.vault.on("create", (f) => f instanceof TFile && f.extension === TILE_EXT && this.cacheId(f)));
@@ -347,7 +349,7 @@ export default class VivariumPlugin extends Plugin {
 			if (spec) live.add(spec.id);
 		}
 		const orphans = this.core.hub.allPanes().filter((p) => !live.has(p.tileId));
-		for (const p of orphans) await this.core.hub.killWindow(p.tileId);
+		for (const p of orphans) await this.core.stopTile(p.tileId);
 		this.core.notice(`stopped ${orphans.length} orphaned program${orphans.length === 1 ? "" : "s"}`);
 	}
 

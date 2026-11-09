@@ -59,6 +59,16 @@ when cards become specks:
 
 - **Terminals live in tmux.** Quit Obsidian, reopen it: every program is still running, with its
   scrollback, its screen (including full-screen apps like `vim` and `htop`) and its cursor.
+- **Even a reboot or crash is survivable.** Vivarium remembers what each tile was running. When
+  Obsidian starts again, those tiles come back by themselves, without you opening their canvas:
+  - **Claude Code** resumes *that tile's own conversation* (`claude --resume <session>`), not just the
+    latest one, so five agents come back as five agents.
+  - **Other programs** show their previous output, a `── restored after restart ──` divider, and
+    start again in the same folder.
+  - **Shells** show their previous output and open in the folder you'd `cd`'d to.
+
+  Tiles you stopped on purpose stay stopped. Snapshots of recent output are kept per device in
+  `~/.vivarium/snapshots/` (mode 0600), never in the vault.
 - **Attach from anywhere:** `tmux -L vivarium attach -t vivarium:<id>`, or `vivarium attach`.
 - **Web tiles remember their page** and keep their logins (own browser profile).
 

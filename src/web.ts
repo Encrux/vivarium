@@ -69,7 +69,9 @@ class WebSurface {
 		this.fwdBtn = btn("arrow-right", "Forward", () => this.wv.canGoForward() && this.wv.goForward());
 		btn("rotate-cw", "Reload", () => this.wv.reload());
 		this.urlInput = bar.createEl("input", { cls: "vivarium-web-url", attr: { type: "text", spellcheck: "false" } });
-		this.urlInput.value = spec.url;
+		// where you last were (per device) — the file keeps the page the tile was made for
+		const startUrl = core.tileState<{ url: string }>(spec.id).url || spec.url;
+		this.urlInput.value = startUrl;
 		this.urlInput.addEventListener("pointerdown", (e) => e.stopPropagation());
 		this.urlInput.addEventListener("keydown", (e) => {
 			e.stopPropagation(); // typing an address must not trigger canvas shortcuts
@@ -77,6 +79,8 @@ class WebSurface {
 				const u = normalizeUrl(this.urlInput.value) ?? `https://duckduckgo.com/?q=${encodeURIComponent(this.urlInput.value)}`;
 				this.wv.loadURL(u);
 				this.wv.focus();
+				// typing an address is a deliberate change: that becomes the tile's page (saved to the file)
+				if (normalizeUrl(this.urlInput.value)) this.setHome(u);
 			} else if (e.key === "Escape") {
 				this.urlInput.value = this.wv.getURL?.() ?? spec.url;
 				this.urlInput.blur();
@@ -89,7 +93,7 @@ class WebSurface {
 		const wv = (this.wv = document.createElement("webview") as any);
 		wv.setAttribute("partition", WEB_PARTITION);
 		wv.setAttribute("allowpopups", "");
-		wv.setAttribute("src", spec.url);
+		wv.setAttribute("src", startUrl);
 		wv.addClass("vivarium-web-view");
 		this.el.appendChild(wv);
 		const nav = () => {
@@ -124,15 +128,23 @@ class WebSurface {
 		this.el.toggleClass("is-dormant", !this.onScreen || this.tiny);
 	}
 
-	/** Remember where you are (debounced; only when something actually changed). */
+	/** Remember where you are, per device (browsing never rewrites the tile file). */
 	private persist(url?: string, title?: string) {
-		if (url && url !== "about:blank") this.spec.url = url;
-		if (title) this.spec.title = title;
+		const patch: Record<string, string> = {};
+		if (url && url !== "about:blank") patch.url = url;
+		if (title) patch.title = title;
+		if (Object.keys(patch).length) this.core.setTileState(this.spec.id, patch);
+	}
+
+	/** Change the page the tile is *for* (saved in the file, so it's what others get). */
+	private setHome(url: string) {
+		if (url === this.spec.url) return;
+		this.spec.url = url;
 		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
 			this.core.app.vault.modify(this.file, JSON.stringify(this.spec, null, 2) + "\n").catch(() => {});
-		}, 1500);
+		}, 300);
 	}
 
 	focus() {
@@ -144,6 +156,7 @@ class WebSurface {
 		this.ro.disconnect();
 		this.offZoom();
 		if (this.saveTimer !== null) {
+			// a pending address change: write it now
 			window.clearTimeout(this.saveTimer);
 			this.core.app.vault.modify(this.file, JSON.stringify(this.spec, null, 2) + "\n").catch(() => {});
 		}

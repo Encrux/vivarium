@@ -56,6 +56,7 @@ export interface TileSpec {
 	id: string;
 	title: string;
 	command: string;
+	/** Portable working directory (see portableCwd): "", ".", "sub/dir", "~/…" or absolute. */
 	cwd: string;
 }
 
@@ -155,6 +156,43 @@ export class VivariumCore {
 		return (this.app.vault.adapter as any).getBasePath?.() ?? process.env.HOME ?? "/";
 	}
 
+	/**
+	 * How a working directory is stored in a tile file: portable, so a committed vault works on
+	 * another machine. "" = the default (settings / vault), "." or "sub/dir" = inside the vault,
+	 * "~/…" = inside your home folder, anything else stays absolute.
+	 */
+	portableCwd(cwd: string): string {
+		if (!cwd.trim()) return "";
+		const abs = path.resolve(this.resolveCwd(cwd));
+		const vault = path.resolve(this.vaultPath());
+		const home = process.env.HOME ? path.resolve(process.env.HOME) : null;
+		if (abs === vault) return ".";
+		if (abs.startsWith(vault + path.sep)) return path.relative(vault, abs);
+		if (home && abs === home) return "~";
+		if (home && abs.startsWith(home + path.sep)) return "~/" + path.relative(home, abs);
+		return abs;
+	}
+
+	// ---- per-device tile state (never in the vault: no git churn, nothing machine-specific synced) ----
+	private stateCache: Record<string, Record<string, unknown>> | null = null;
+	private stateTimer: number | null = null;
+
+	tileState<T = Record<string, unknown>>(id: string): Partial<T> {
+		this.stateCache ??= (this.app.loadLocalStorage("vivarium-tile-state") as Record<string, Record<string, unknown>>) ?? {};
+		return (this.stateCache[id] ?? {}) as Partial<T>;
+	}
+
+	setTileState(id: string, patch: Record<string, unknown> | null) {
+		this.stateCache ??= (this.app.loadLocalStorage("vivarium-tile-state") as Record<string, Record<string, unknown>>) ?? {};
+		if (patch === null) delete this.stateCache[id];
+		else this.stateCache[id] = { ...this.stateCache[id], ...patch };
+		if (this.stateTimer !== null) window.clearTimeout(this.stateTimer);
+		this.stateTimer = window.setTimeout(() => {
+			this.stateTimer = null;
+			this.app.saveLocalStorage("vivarium-tile-state", this.stateCache);
+		}, 500);
+	}
+
 	resolveCwd(cwd: string): string {
 		let c = cwd || this.settings.defaultCwd || this.vaultPath();
 		if (c.startsWith("~")) c = path.join(process.env.HOME ?? "/", c.slice(1));
@@ -195,7 +233,7 @@ export class VivariumCore {
 		const base = (program.name || "Program").replace(/[\\/:*?"<>|#^[\]]/g, "-").trim() || "Program";
 		let p = normalizePath(`${folder}/${base}.${TILE_EXT}`);
 		for (let i = 2; this.app.vault.getAbstractFileByPath(p); i++) p = normalizePath(`${folder}/${base} ${i}.${TILE_EXT}`);
-		const spec: TileSpec = { version: 1, id, title: program.name, command: program.command, cwd: this.resolveCwd(program.cwd) };
+		const spec: TileSpec = { version: 1, id, title: program.name, command: program.command, cwd: this.portableCwd(program.cwd) };
 		return this.app.vault.create(p, JSON.stringify(spec, null, 2) + "\n");
 	}
 
@@ -245,11 +283,17 @@ export class VivariumCore {
 		const base = (app.name || "App").replace(/[\\/:*?"<>|#^[\]]/g, "-").trim() || "App";
 		let p = normalizePath(`${folder}/${base}.window`);
 		for (let i = 2; this.app.vault.getAbstractFileByPath(p); i++) p = normalizePath(`${folder}/${base} ${i}.window`);
-		const spec = { version: 1, id, kind: "app", title: app.name, app, windowId, titleHint };
+		// which window it shows is per-device state, not part of the (committable) file
+		if (windowId !== undefined) this.setTileState(id, { windowId, titleHint });
+		const spec = { version: 1, id, kind: "app", title: app.name, app };
 		return this.app.vault.create(p, JSON.stringify(spec, null, 2) + "\n");
 	}
 
 	dispose() {
+		if (this.stateTimer !== null) {
+			window.clearTimeout(this.stateTimer);
+			this.app.saveLocalStorage("vivarium-tile-state", this.stateCache);
+		}
 		this.hub.dispose();
 		this.helper?.dispose();
 	}

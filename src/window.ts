@@ -137,10 +137,10 @@ export class WindowSurface implements StreamSink {
 			this.win = await this.resolveWindow();
 			if (!this.win) return;
 			this.core.claimWindow(this.win.windowId, this);
-			if (this.spec.windowId !== this.win.windowId) {
-				this.spec.windowId = this.win.windowId;
-				this.spec.titleHint = this.win.title || this.spec.titleHint;
-				this.core.app.vault.modify(this.file, JSON.stringify(this.spec, null, 2) + "\n").catch(() => {});
+			// remember the window per device (local storage), never in the tile file
+			const st = this.core.tileState<{ windowId: number; titleHint: string }>(this.spec.id);
+			if (st.windowId !== this.win.windowId) {
+				this.core.setTileState(this.spec.id, { windowId: this.win.windowId, titleHint: this.win.title || st.titleHint || this.spec.titleHint });
 			}
 			this.winW = this.win.width;
 			this.winH = this.win.height;
@@ -192,12 +192,16 @@ export class WindowSurface implements StreamSink {
 		const list = async () => ((await h.request("list_windows")).windows as WindowInfo[]).filter((w) => w.bundleId === this.spec.app.bundleId);
 		let wins = await list();
 		const free = (w: WindowInfo) => !this.core.windowClaimedByOther(w.windowId, this);
-		const remembered = wins.find((w) => w.windowId === this.spec.windowId && free(w));
+		// per-device memory first; windowId/titleHint in the file only exist in older tiles
+		const st = this.core.tileState<{ windowId: number; titleHint: string }>(this.spec.id);
+		const rememberedId = st.windowId ?? this.spec.windowId;
+		const hint = st.titleHint ?? this.spec.titleHint;
+		const remembered = wins.find((w) => w.windowId === rememberedId && free(w));
 		if (remembered) return remembered;
-		const hinted = this.spec.titleHint ? wins.find((w) => free(w) && w.title === this.spec.titleHint) : undefined;
+		const hinted = hint ? wins.find((w) => free(w) && w.title === hint) : undefined;
 		if (hinted) return hinted;
 		const anyFree = wins.find(free);
-		if (anyFree && !this.spec.windowId) return anyFree;
+		if (anyFree && !rememberedId) return anyFree;
 		// Launch the app (or ask a running one for a new window) and wait for a fresh window.
 		this.setStatus(`Opening ${this.spec.app.name}…`);
 		const before = new Set(wins.map((w) => w.windowId));
@@ -223,6 +227,7 @@ export class WindowSurface implements StreamSink {
 		this.win = null;
 		this.setStatus(`${this.spec.app.name} window closed.`, "Reopen", () => {
 			this.spec.windowId = undefined;
+			this.core.setTileState(this.spec.id, { windowId: undefined });
 			this.start();
 		});
 	}

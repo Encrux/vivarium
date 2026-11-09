@@ -104,6 +104,26 @@ window comes forward over it, so you use the actual app. Click the canvas to sen
 needs **Screen Recording** and **Accessibility** for Obsidian (System Settings → Privacy & Security).
 Prefer **web tiles** for anything that runs in a browser: they're instant and never switch focus.
 
+## Vaults in git (or synced)
+
+Tiles are plain text and safe to commit. A `.term` file is a recipe (command, title, working
+folder), not the running program, so cloning a vault re-launches its programs fresh on the other
+machine:
+
+| File | Holds | On another machine |
+|---|---|---|
+| `.term` | `command`, `title`, `cwd` (vault-relative, `~/…`, or absolute) | starts the command fresh, with no history; falls back to `~` if the folder doesn't exist |
+| `.web` | the page the tile is *for* | opens that page; logins stay on each device |
+| `.window` | which app (bundle id) | macOS: opens a window of that app |
+
+Tile files only change when **you** change a tile. Things that differ per machine, like which app
+window a tile shows or the page you browsed to, live in Obsidian's per-device storage, never in the
+vault, so syncing or auto-committing a vault doesn't produce a stream of noise. (Typing a new
+address into a web tile's address bar *is* a change to the tile, so that one is saved.)
+
+> **Don't put secrets in tile commands.** They're stored verbatim in the `.term` file. Use your
+> shell's environment (`.zshrc`, a secrets manager) instead.
+
 ## How it works
 
 ```

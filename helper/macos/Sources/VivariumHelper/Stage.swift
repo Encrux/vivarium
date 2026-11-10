@@ -17,7 +17,12 @@ final class Stage {
 
     private var display: CGVirtualDisplay?
     private(set) var displayID: CGDirectDisplayID = 0
-    private var slots: [CGWindowID: Int] = [:]
+    private var slots: [CGWindowID: Int] = [:] {
+        didSet { parkedLock.lock(); parked = Set(slots.keys); parkedLock.unlock() }
+    }
+    /// Copy of `slots.keys` readable from capture threads.
+    private var parked: Set<CGWindowID> = []
+    private let parkedLock = NSLock()
     private var owners: [CGWindowID: pid_t] = [:]
     private var watching = false
     // points; HiDPI so streamed windows stay sharp on Retina canvases
@@ -126,6 +131,12 @@ final class Stage {
     func unpark(windowId: CGWindowID, pid: pid_t) throws {
         let target = Windows.obsidianWindowFrame() ?? CGDisplayBounds(CGMainDisplayID())
         try Windows.setFrame(pid: pid, id: windowId, origin: CGPoint(x: target.minX + 40, y: target.minY + 40), size: nil)
+    }
+
+    /// Thread-safe: capture code asks this off the main thread.
+    func isParked(_ windowId: CGWindowID) -> Bool {
+        parkedLock.lock(); defer { parkedLock.unlock() }
+        return parked.contains(windowId)
     }
 
     func forget(_ windowId: CGWindowID) {

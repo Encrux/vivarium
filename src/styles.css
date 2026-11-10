@@ -1,7 +1,8 @@
 @import "@xterm/xterm/css/xterm.css";
 
 /* ---- tile container ---- */
-.vivarium-embed { width: 100%; height: 100%; }
+/* Canvas centres text in file cards; tiles are programs, not captions. */
+.vivarium-embed { width: 100%; height: 100%; text-align: left; }
 .canvas-node-content.vivarium-embed { overflow: hidden; }
 .vivarium-term {
 	position: relative;

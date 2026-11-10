@@ -67,8 +67,10 @@ final class WindowStream: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     /// Menus, popovers, tooltips (layer > 0) and sheets/dialogs (smaller, inside the window) of the same app.
+    /// Never another tile's window: parked windows are cascaded on the stage, so a second Safari
+    /// tile's window can sit inside this one's frame and would otherwise be taken for a sheet.
     private func isPopup(_ id: CGWindowID, _ layer: Int, _ f: CGRect, owner: pid_t?) -> Bool {
-        owner == pid && id != windowId && f.intersects(frame)
+        owner == pid && id != windowId && f.intersects(frame) && !Stage.shared.isParked(id)
             && (layer > 0 || (layer == 0 && frame.contains(f) && f.size != frame.size))
     }
 

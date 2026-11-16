@@ -166,6 +166,7 @@ export class TerminalSurface {
 	private setVisible(v: boolean) {
 		if (v === this.visible) return;
 		this.visible = v;
+		if (!v) this.takeKeys(false); // off screen: the keyboard goes back to the canvas
 		if (this.hideTimer !== null) {
 			window.clearTimeout(this.hideTimer);
 			this.hideTimer = null;
@@ -392,7 +393,15 @@ export class TerminalSurface {
 			const scope = new Scope(this.core.app.scope);
 			// true = "handled, but let the key through" (false would preventDefault it); undefined
 			// falls through to the parent (global hotkeys).
-			scope.register(null, null, (e) => (TerminalSurface.forObsidian(e) ? undefined : true));
+			scope.register(null, null, (e) => {
+				// Canvas can drop a focused terminal from the page (zoomed out, scrolled away) without
+				// a focusout: if focus isn't ours any more, step aside instead of holding the keys.
+				if (!this.el.isConnected || !this.el.contains(document.activeElement)) {
+					this.takeKeys(false);
+					return undefined;
+				}
+				return TerminalSurface.forObsidian(e) ? undefined : true;
+			});
 			keymap.pushScope(scope);
 			this.keyScope = scope;
 		} else if (!on && this.keyScope) {

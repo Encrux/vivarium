@@ -116,8 +116,8 @@ export class VivariumCore {
 			"set -g automatic-rename off",
 			"set -g escape-time 0",
 			"set -g focus-events on",
-			// Sizes are owned by the plugin (one tile = one size), not negotiated between clients.
-			"set -g window-size manual",
+			// No global `window-size manual` here: tmux 3.6 crashes on start with it. Each tile's window
+			// is set to manual on its own instead (see TmuxHub.createWindow).
 			"set-environment -g COLORTERM truecolor",
 			"set-environment -g TERM_PROGRAM vivarium",
 			"",

@@ -98,6 +98,8 @@ export class TmuxHub {
 	outputSeq = 0;
 	/** Called when a pane's dead-state or the window set changes. */
 	onPanesChanged: () => void = () => {};
+	/** Set while connect() runs on a spawned control client (see cmdSeq). */
+	private connectingProc: ChildProcess | null = null;
 	/** Exposed to programs as $VIVARIUM_VAULT so the CLI inside a tile talks to the right vault. */
 	vaultName = "";
 
@@ -139,7 +141,16 @@ export class TmuxHub {
 		if (this.disposed) throw new Error("hub disposed");
 		// Create the session (idempotently) with a placeholder window so the session survives
 		// when every tile is closed.
-		await this.exec("new-session", "-A", "-d", "-s", SESSION, "-n", HUB_WINDOW, "sh -c 'while :; do sleep 86400; done'").catch(() => {});
+		// (-A on an existing session acts like attach and fails without a terminal: that's fine.)
+		const created = await this.exec("new-session", "-A", "-d", "-s", SESSION, "-n", HUB_WINDOW, "sh -c 'while :; do sleep 86400; done'").then(
+			() => "",
+			(e: Error) => e.message.trim(),
+		);
+		// If the session doesn't exist now, tmux itself failed (e.g. its server crashed on start):
+		// say so, rather than leaving tiles waiting on a server that isn't there.
+		await this.exec("has-session", "-t", SESSION).catch(() => {
+			throw new Error(created || "tmux could not create its session");
+		});
 		await this.exec("source-file", this.confPath).catch(() => {});
 
 		const proc = spawn(this.tmuxPath, this.args("-C", "attach-session", "-t", SESSION), {
@@ -147,6 +158,7 @@ export class TmuxHub {
 			env: this.env(),
 		});
 		this.proc = proc;
+		this.connectingProc = proc;
 		this.inBlock = false;
 		proc.stdout!.on("data", (chunk: Buffer) => this.onData(chunk));
 		proc.stderr!.on("data", (d) => console.warn("[vivarium] tmux:", String(d)));
@@ -165,13 +177,17 @@ export class TmuxHub {
 			}
 		});
 
-		// Pause panes whose output we fall >2s behind on, instead of buffering unboundedly in tmux.
-		await this.cmd("refresh-client -f pause-after=3").catch(() => {});
-		// Get notified when a pane dies (program exited, remain-on-exit keeps the window).
-		await this.cmd(`refresh-client -B ${tq("dead:%*:#{pane_dead}")}`).catch(() => {});
-		await this.refreshPanes();
-		// Default: output off for every pane until a surface subscribes.
-		for (const p of this.panes.values()) await this.setPaneOutput(p.paneId, this.listeners.has(p.paneId));
+		try {
+			// Pause panes whose output we fall >2s behind on, instead of buffering unboundedly in tmux.
+			await this.cmd("refresh-client -f pause-after=3").catch(() => {});
+			// Get notified when a pane dies (program exited, remain-on-exit keeps the window).
+			await this.cmd(`refresh-client -B ${tq("dead:%*:#{pane_dead}")}`).catch(() => {});
+			await this.refreshPanes();
+			// Default: output off for every pane until a surface subscribes.
+			for (const p of this.panes.values()) await this.setPaneOutput(p.paneId, this.listeners.has(p.paneId));
+		} finally {
+			this.connectingProc = null;
+		}
 	}
 
 	private async resubscribeAll() {
@@ -187,6 +203,9 @@ export class TmuxHub {
 	/** Like cmd(), but also returns outputSeq at the moment the reply ended. */
 	cmdSeq(command: string): Promise<{ lines: string[]; seq: number }> {
 		const proc = this.proc;
+		// The control client died while connect() itself was talking to it: waiting for a
+		// reconnect here would wait on connect(), i.e. on ourselves.
+		if (!proc && this.connectingProc) return Promise.reject(new Error("tmux control client exited"));
 		if (!proc) return this.ensureConnected().then(() => this.cmdSeq(command));
 		return new Promise((resolve, reject) => {
 			const p: Pending = { resolve: (lines) => resolve({ lines, seq: p.seq ?? this.outputSeq }), reject, lines: [] };
@@ -346,12 +365,16 @@ export class TmuxHub {
 		pane = this.panes.get(tileId);
 		if (pane) return pane;
 		const dir = cwd && fs.existsSync(cwd) ? cwd : process.env.HOME ?? "/";
-		// window-size is manual: new windows take default-size, so the program starts at its final size.
+		// Sizes are owned by the plugin (one tile = one size), not negotiated between clients. A new
+		// window takes default-size (control clients don't count towards sizing), so the program
+		// starts at its final size; then we pin it (window-size manual for that window only).
 		await this.cmd(`set-option -g default-size ${cols}x${rows}`).catch(() => {});
 		const lines = await this.cmd(
 			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} ${tq(launch.command)}`,
 		);
 		const [windowId, paneId] = (lines[0] ?? "").split(" ");
+		// Pin this window's size, so a terminal attaching to it (`vivarium attach`) doesn't resize it.
+		await this.cmd(`set-option -w -t ${tq(windowId)} window-size manual`).catch(() => {});
 		await this.cmd(`resize-window -t ${tq(windowId)} -x ${cols} -y ${rows}`).catch(() => {});
 		pane = { tileId, windowId, paneId, dead: false };
 		this.panes.set(tileId, pane);

@@ -63,6 +63,7 @@ when cards become specks:
   Obsidian starts again, those tiles come back by themselves, without you opening their canvas:
   - **Claude Code** resumes *that tile's own conversation* (`claude --resume <session>`), not just the
     latest one, so five agents come back as five agents.
+  - **Codex** does the same with `codex resume <session>`.
   - **Other programs** show their previous output, a `── restored after restart ──` divider, and
     start again in the same folder.
   - **Shells** show their previous output and open in the folder you'd `cd`'d to.

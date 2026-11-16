@@ -1,4 +1,4 @@
-import { ItemView, Menu, Plugin, PluginSettingTab, Setting, TFile, App, setIcon } from "obsidian";
+import { Component, ItemView, Menu, Plugin, PluginSettingTab, Setting, TFile, App, setIcon } from "obsidian";
 import { VivariumCore, VivariumSettings, DEFAULT_SETTINGS, Program, TILE_EXT } from "./core";
 import { TermEmbed, TermView, VIEW_TYPE } from "./embed";
 import { Picked, ProgramPicker } from "./programs";
@@ -7,6 +7,7 @@ import { WEB_EXT, WebEmbed, WebView, WEB_VIEW_TYPE } from "./web";
 import type { AppInfo, WindowInfo } from "./helper";
 import { ControlServer } from "./control";
 import { SemanticZoom } from "./zoom";
+import { hookTileLabel, renameTile } from "./label";
 
 // Minimal shapes for Obsidian's (undocumented) canvas internals we touch.
 interface CanvasNode {
@@ -47,17 +48,17 @@ export default class VivariumPlugin extends Plugin {
 		this.registerView(VIEW_TYPE, (leaf) => new TermView(leaf, this.core));
 		this.registerExtensions([TILE_EXT], VIEW_TYPE);
 		const registry = (this.app as any).embedRegistry;
-		registry.registerExtension(TILE_EXT, (ctx: any, file: TFile) => new TermEmbed(this.core, ctx, file));
+		registry.registerExtension(TILE_EXT, (ctx: any, file: TFile) => this.withLabel(new TermEmbed(this.core, ctx, file), ctx, file));
 		this.register(() => registry.unregisterExtension(TILE_EXT));
 		// App tiles (any native window), when the helper exists for this platform.
 		this.registerView(WINDOW_VIEW_TYPE, (leaf) => new WindowView(leaf, this.core));
 		this.registerExtensions([WINDOW_EXT], WINDOW_VIEW_TYPE);
-		registry.registerExtension(WINDOW_EXT, (ctx: any, file: TFile) => new WindowEmbed(this.core, ctx, file));
+		registry.registerExtension(WINDOW_EXT, (ctx: any, file: TFile) => this.withLabel(new WindowEmbed(this.core, ctx, file), ctx, file));
 		this.register(() => registry.unregisterExtension(WINDOW_EXT));
 		// Web tiles: a real browser page inside the canvas.
 		this.registerView(WEB_VIEW_TYPE, (leaf) => new WebView(leaf, this.core));
 		this.registerExtensions([WEB_EXT], WEB_VIEW_TYPE);
-		registry.registerExtension(WEB_EXT, (ctx: any, file: TFile) => new WebEmbed(this.core, ctx, file));
+		registry.registerExtension(WEB_EXT, (ctx: any, file: TFile) => this.withLabel(new WebEmbed(this.core, ctx, file), ctx, file));
 		this.register(() => registry.unregisterExtension(WEB_EXT));
 
 		this.addCommand({
@@ -116,7 +117,9 @@ export default class VivariumPlugin extends Plugin {
 		this.registerEvent(
 			(this.app.workspace as any).on("canvas:node-menu", (menu: Menu, node: CanvasNode) => {
 				const f = node.file;
-				if (!f || f.extension !== TILE_EXT) return;
+				if (!f || ![TILE_EXT, WINDOW_EXT, WEB_EXT].includes(f.extension)) return;
+				menu.addItem((i) => i.setSection("vivarium").setTitle("Rename tile…").setIcon("pencil").onClick(() => renameTile(this.app, f)));
+				if (f.extension !== TILE_EXT) return;
 				menu.addItem((i) => i.setSection("vivarium").setTitle("Restart program").setIcon("rotate-ccw").onClick(() => this.restartTile(f)));
 				menu.addItem((i) => i.setSection("vivarium").setTitle("Stop program").setIcon("square").onClick(() => this.stopTile(f)));
 				menu.addItem((i) =>
@@ -154,6 +157,20 @@ export default class VivariumPlugin extends Plugin {
 				this.idCache.delete(old);
 				this.idCache.set(f.path, id);
 			}
+			// The tile's name is its file name: keep the title stored inside (`vivarium ls`) in step.
+			if (f instanceof TFile && f.extension === TILE_EXT) {
+				this.app.vault
+					.process(f, (raw) => {
+						try {
+							const d = JSON.parse(raw);
+							if (!d || typeof d !== "object" || d.title === f.basename) return raw;
+							return JSON.stringify({ ...d, title: f.basename }, null, 2) + "\n";
+						} catch {
+							return raw;
+						}
+					})
+					.catch(() => {});
+			}
 		}));
 		this.app.workspace.onLayoutReady(() => this.app.vault.getFiles().filter((f) => f.extension === TILE_EXT).forEach((f) => this.cacheId(f)));
 
@@ -171,6 +188,12 @@ export default class VivariumPlugin extends Plugin {
 		this.control?.stop();
 		document.querySelectorAll(".vivarium-card-menu-button").forEach((el) => el.remove());
 		this.core.dispose();
+	}
+
+	/** Every tile card: name without the file ending, double-click the name to rename. */
+	private withLabel<T extends Component>(embed: T, ctx: { containerEl: HTMLElement }, file: TFile): T {
+		hookTileLabel(this.app, embed, ctx.containerEl, file);
+		return embed;
 	}
 
 	// File deletion fires after the file is gone, so remember each tile's id up front.

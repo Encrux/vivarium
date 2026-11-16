@@ -10,6 +10,7 @@
  *  - On show  → flush the small buffer, or (if stale) repaint from a tmux snapshot.
  * The xterm instance itself survives hide/show, so panning back is instant.
  */
+import { Scope } from "obsidian";
 import { Terminal, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import type { VivariumCore } from "./core";
@@ -365,12 +366,62 @@ export class TerminalSurface {
 		if (report) ms.getMouseReportCoords = (ev: any, el: HTMLElement) => report(unscale(ev, el), el);
 	}
 
+	/**
+	 * Which keys Obsidian may have while you type in a terminal: only its own chords, so its hotkeys
+	 * keep working. macOS: Cmd+… (not copy/paste/cut/select-all). Elsewhere Ctrl+… belongs to the
+	 * shell (Ctrl+C, Ctrl+W, Ctrl+R, …), so Obsidian gets Ctrl+Shift+… (not copy/paste), the way
+	 * Linux terminals split it.
+	 */
+	private static forObsidian(e: KeyboardEvent): boolean {
+		const k = e.key.toLowerCase();
+		if (process.platform === "darwin") return e.metaKey && !["c", "v", "x", "a"].includes(k);
+		return e.ctrlKey && e.shiftKey && !["c", "v"].includes(k);
+	}
+
+	/**
+	 * Obsidian handles hotkeys before the key reaches us (a capturing listener on the window), and
+	 * Canvas's handlers (arrows nudge the card, Shift+1 zooms, …) only skip <input>s and
+	 * contenteditable, not xterm's <textarea>. So while the terminal has focus, a keymap scope of
+	 * ours sits on top: it leaves every key to the terminal except Obsidian's own chords, which go
+	 * to the app's global hotkeys, skipping Canvas.
+	 */
+	private keyScope: Scope | null = null;
+	private takeKeys(on: boolean) {
+		const keymap = this.core.app.keymap;
+		if (on && !this.keyScope) {
+			const scope = new Scope(this.core.app.scope);
+			// true = "handled, but let the key through" (false would preventDefault it); undefined
+			// falls through to the parent (global hotkeys).
+			scope.register(null, null, (e) => (TerminalSurface.forObsidian(e) ? undefined : true));
+			keymap.pushScope(scope);
+			this.keyScope = scope;
+		} else if (!on && this.keyScope) {
+			keymap.popScope(this.keyScope);
+			this.keyScope = null;
+		}
+	}
+
 	/** Keep keystrokes/clipboard from reaching canvas shortcuts (Space=pan, Backspace=delete, paste=new card). */
 	private isolateEvents() {
 		const stop = (e: Event) => e.stopPropagation();
+		if (process.platform !== "darwin") {
+			// Linux terminals copy with Ctrl+Shift+C (Ctrl+C is the shell's interrupt). Ctrl+Shift+V
+			// already pastes: Chromium turns it into a paste event, which xterm handles.
+			this.term.attachCustomKeyEventHandler((e) => {
+				if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "c") {
+					if (this.term.hasSelection()) navigator.clipboard.writeText(this.term.getSelection()).catch(() => {});
+					e.preventDefault();
+					return false;
+				}
+				return true;
+			});
+		}
+		this.el.addEventListener("focusin", () => this.takeKeys(true));
+		this.el.addEventListener("focusout", (e) => {
+			if (!this.el.contains(e.relatedTarget as Node | null)) this.takeKeys(false);
+		});
 		const keyStop = (e: KeyboardEvent) => {
-			// Let Cmd-chords through so Obsidian hotkeys (Cmd+P, Cmd+W, …) keep working.
-			if (e.metaKey && !["c", "v", "x", "a"].includes(e.key.toLowerCase())) return;
+			if (TerminalSurface.forObsidian(e)) return;
 			e.stopPropagation();
 		};
 		this.el.addEventListener("keydown", keyStop);
@@ -449,6 +500,7 @@ export class TerminalSurface {
 		this.detachStream();
 		if (this.pane && this.core.sizeOwners.get(this.pane.paneId) === this) this.core.sizeOwners.delete(this.pane.paneId);
 		this.unregister();
+		this.takeKeys(false);
 		this.term.dispose();
 		this.el.remove();
 	}

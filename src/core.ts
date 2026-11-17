@@ -46,7 +46,9 @@ export const DEFAULT_SETTINGS: VivariumSettings = {
 	programs: [
 		{ name: "Shell", command: "", cwd: "" },
 		{ name: "Claude Code", command: "claude", cwd: "" },
-		{ name: "Codex", command: "codex", cwd: "" },
+		// Codex's default full-screen mode keeps its history out of the terminal's scrollback, and
+		// the wheel then recalls old prompts. Inline, the tile scrolls through the conversation.
+		{ name: "Codex", command: "codex --no-alt-screen", cwd: "" },
 		{ name: "htop", command: "htop", cwd: "" },
 	],
 };

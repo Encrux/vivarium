@@ -13,6 +13,7 @@
 import { Scope } from "obsidian";
 import { Terminal, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { VivariumCore } from "./core";
 import type { PaneInfo } from "./tmux";
 import type { Launch } from "./core";
@@ -69,10 +70,14 @@ export class TerminalSurface {
 			allowProposedApi: false,
 			macOptionIsMeta: s.optionIsMeta,
 			theme: core.theme(),
+			// Links a program marks up itself (OSC 8, e.g. Codex, ls --hyperlink): click opens them.
+			linkHandler: { activate: (_e, uri) => openLink(uri), allowNonHttpProtocols: false },
 			// DOM renderer (default): crisp at every canvas zoom level (CSS transform scales vectors),
 			// and no WebGL context limit (~16 per page) to run into with many tiles.
 		});
 		this.term.loadAddon(this.fit);
+		// Plain URLs in the output (also when wrapped over several lines): click opens them.
+		this.term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)));
 		this.term.open(this.el);
 		this.patchMouseForCssScale();
 		this.isolateEvents();
@@ -512,6 +517,19 @@ export class TerminalSurface {
 		this.takeKeys(false);
 		this.term.dispose();
 		this.el.remove();
+	}
+}
+
+/** Open a link from a terminal in your default browser (not inside Obsidian). */
+function openLink(uri: string) {
+	if (!/^(https?|mailto):/i.test(uri)) return;
+	try {
+		// Obsidian's renderer has Node/Electron: shell.openExternal hands the URL to the system
+		// (xdg-open on Linux, Launch Services on macOS) → your default browser.
+		const { shell } = (window as any).require("electron");
+		shell.openExternal(uri).catch(() => window.open(uri));
+	} catch {
+		window.open(uri);
 	}
 }
 

@@ -72,7 +72,8 @@ export class SessionKeeper {
 					running: !r.dead,
 					fg,
 					cwd: r.cwd || prev.cwd,
-					agent: agent ?? undefined,
+					// A dead pane keeps the conversation it last ran, so "Restart" can resume it.
+					agent: agent ?? (r.dead ? prev.agent : undefined),
 				};
 				if (JSON.stringify(next) !== JSON.stringify({ running: prev.running, fg: prev.fg, cwd: prev.cwd, agent: prev.agent })) {
 					this.core.setTileState(r.tileId, next as Record<string, unknown>);
@@ -136,8 +137,22 @@ export class SessionKeeper {
 		};
 	}
 
-	/** On startup: bring back every tile that was running, without waiting for its canvas. */
-	async restoreAll() {
+	/**
+	 * How "Restart" starts a tile: a coding agent comes back with its own conversation (that's what
+	 * you lost), anything else starts fresh.
+	 */
+	restartFor(spec: TileSpec): { launch: Launch; cwd: string } {
+		const fresh = { launch: this.core.launch(spec), cwd: this.core.resolveCwd(spec.cwd) };
+		const st = this.core.tileState<RunState>(spec.id);
+		const resume = st.agent && /^[\w-]{8,}$/.test(st.agent.sessionId) ? resumeCommand(spec.command.trim(), st.agent) : null;
+		if (!resume) return fresh;
+		const shell = process.env.SHELL || "/bin/zsh";
+		const cwd = st.cwd && fs.existsSync(st.cwd) ? st.cwd : fresh.cwd;
+		return { launch: { command: `${shell} -l`, typeIn: resume }, cwd };
+	}
+
+	/** On startup, or after the tmux server died: bring back every tile that was running, without waiting for its canvas. */
+	async restoreAll(why = "after restart") {
 		const files = this.core.app.vault.getFiles().filter((f) => f.extension === "term");
 		const wanted: TileSpec[] = [];
 		for (const f of files) {
@@ -154,7 +169,7 @@ export class SessionKeeper {
 			await this.core.hub.ensureWindow(spec.id, launch, cwd, 120, 36).catch((e) => console.warn("[vivarium] restore", e));
 			n++;
 		}
-		if (n) this.core.notice(`restored ${n} program${n === 1 ? "" : "s"} after restart`);
+		if (n) this.core.notice(`restored ${n} program${n === 1 ? "" : "s"} ${why}`);
 	}
 }
 

@@ -29,6 +29,8 @@ export interface SurfaceOptions {
 	/** How to start it if its tmux window doesn't exist yet: fresh, or restored after a reboot. */
 	startLaunch?: Launch;
 	startCwd?: string;
+	/** How "Restart" starts it (e.g. a coding agent with its own conversation); default: launch/cwd. */
+	relaunch?: () => { launch: Launch; cwd: string };
 	cwd: string;
 	tileId: string;
 }
@@ -76,6 +78,14 @@ export class TerminalSurface {
 			// and no WebGL context limit (~16 per page) to run into with many tiles.
 		});
 		this.term.loadAddon(this.fit);
+		// A program clearing the scrollback (ESC[3J) is about to redraw it: Codex does this on every
+		// resize, reprinting the whole conversation for the new width. If you had scrolled up, xterm
+		// would keep the view pinned to the (new) top while the reprint pours in below. Follow the
+		// bottom instead, where the reprint ends up.
+		this.term.parser.registerCsiHandler({ final: "J" }, (params) => {
+			if (params[0] === 3) this.term.scrollToBottom();
+			return false; // xterm still does the clearing itself
+		});
 		// Plain URLs in the output (also when wrapped over several lines): click opens them.
 		this.term.loadAddon(new WebLinksAddon((_e, uri) => openLink(uri)));
 		this.term.open(this.el);
@@ -124,7 +134,7 @@ export class TerminalSurface {
 		try {
 			this.pane = await this.core.hub.ensureWindow(this.opts.tileId, this.opts.startLaunch ?? this.opts.launch, this.opts.startCwd ?? this.opts.cwd, cols, rows);
 		} catch (e) {
-			this.showOverlay(`Could not start tmux: ${(e as Error).message}`, false);
+			this.showOverlay(`Could not start tmux: ${(e as Error).message}`, true, "Retry");
 			return;
 		}
 		this.needsRepaint = true;
@@ -147,6 +157,7 @@ export class TerminalSurface {
 			this.pane = p;
 			this.hideOverlay();
 			this.needsRepaint = true;
+			this.lastSize = ""; // a new window: tell it this tile's size
 			if (this.visible) this.goLive();
 			this.updateDeadState();
 			return;
@@ -155,6 +166,7 @@ export class TerminalSurface {
 			this.detachStream();
 			this.pane = p;
 			this.needsRepaint = true;
+			this.lastSize = "";
 			if (this.visible) this.goLive();
 		}
 		this.updateDeadState();
@@ -469,12 +481,12 @@ export class TerminalSurface {
 		this.scheduleFit();
 	}
 
-	private showOverlay(msg: string, restart: boolean) {
+	private showOverlay(msg: string, restart: boolean, label = "Restart") {
 		this.hideOverlay();
 		const o = (this.overlayEl = this.el.createDiv({ cls: "vivarium-term-overlay" }));
 		o.createSpan({ text: msg });
 		if (restart) {
-			const b = o.createEl("button", { text: "Restart", cls: "mod-cta" });
+			const b = o.createEl("button", { text: label, cls: "mod-cta" });
 			b.addEventListener("click", (e) => {
 				e.stopPropagation();
 				this.restart();
@@ -489,9 +501,10 @@ export class TerminalSurface {
 
 	async restart() {
 		this.hideOverlay();
+		const { launch, cwd } = this.opts.relaunch?.() ?? { launch: this.opts.launch, cwd: this.opts.cwd };
 		const p = this.core.hub.getPane(this.opts.tileId);
 		if (p) {
-			await this.core.hub.respawn(this.opts.tileId, this.opts.launch, this.opts.cwd);
+			await this.core.hub.respawn(this.opts.tileId, launch, cwd);
 			this.term.reset();
 			this.lastSize = "";
 			this.scheduleFit();
@@ -499,6 +512,8 @@ export class TerminalSurface {
 			this.detachStream();
 			this.pane = null;
 			this.term.reset();
+			this.opts.startLaunch = launch;
+			this.opts.startCwd = cwd;
 			await this.start();
 		}
 	}

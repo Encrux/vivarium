@@ -98,6 +98,11 @@ export class VivariumCore {
 		const conf = this.writeTmuxConf();
 		const hub = new TmuxHub(tmux ?? "tmux", this.settings.socketName || "vivarium", conf);
 		hub.onPanesChanged = () => this.surfaces.forEach((s) => s.onPanesChanged());
+		// The tmux server died (crash, OOM, killed) and took every program with it: bring back what
+		// was running, agents with their own conversation, as after a reboot.
+		hub.onServerRestarted = () => {
+			this.keeper.restoreAll("after tmux stopped unexpectedly").catch((e) => console.warn("[vivarium] restore", e));
+		};
 		hub.vaultName = this.app.vault.getName();
 		return hub;
 	}

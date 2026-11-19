@@ -100,6 +100,16 @@ export class TmuxHub {
 	onPanesChanged: () => void = () => {};
 	/** Set while connect() runs on a spawned control client (see cmdSeq). */
 	private connectingProc: ChildProcess | null = null;
+	/** PID of the tmux server we're attached to: a different one after a reconnect means it died. */
+	private serverPid: string | null = null;
+	/** Why the last control client went away (tmux's %exit reason or its stderr), for error messages. */
+	private exitReason = "";
+	private reconnectTimer: number | null = null;
+	/**
+	 * The tmux server went away and a new one took its place: every program in it ended. Called
+	 * once the new connection is up (the keeper brings the tiles that were running back).
+	 */
+	onServerRestarted: () => void = () => {};
 	/** Exposed to programs as $VIVARIUM_VAULT so the CLI inside a tile talks to the right vault. */
 	vaultName = "";
 
@@ -152,6 +162,9 @@ export class TmuxHub {
 			throw new Error(created || "tmux could not create its session");
 		});
 		await this.exec("source-file", this.confPath).catch(() => {});
+		const pid = (await this.exec("display-message", "-p", "-t", SESSION, "#{pid}").catch(() => "")).trim();
+		const serverRestarted = !!pid && this.serverPid !== null && pid !== this.serverPid;
+		if (pid) this.serverPid = pid;
 
 		const proc = spawn(this.tmuxPath, this.args("-C", "attach-session", "-t", SESSION), {
 			stdio: ["pipe", "pipe", "pipe"],
@@ -160,21 +173,28 @@ export class TmuxHub {
 		this.proc = proc;
 		this.connectingProc = proc;
 		this.inBlock = false;
-		proc.stdout!.on("data", (chunk: Buffer) => this.onData(chunk));
-		proc.stderr!.on("data", (d) => console.warn("[vivarium] tmux:", String(d)));
-		proc.on("exit", () => {
+		this.partial = null; // a half line from a client that died must not prefix the new one's output
+		this.exitReason = "";
+		// Only the current client's output counts (a dead one can still flush its pipe).
+		proc.stdout!.on("data", (chunk: Buffer) => this.proc === proc && this.onData(chunk));
+		proc.stderr!.on("data", (d) => {
+			const msg = String(d).trim();
+			if (msg) this.exitReason = msg;
+			console.warn("[vivarium] tmux:", msg);
+		});
+		proc.on("exit", (code, signal) => {
 			if (this.proc !== proc) return;
 			this.proc = null;
-			const err = new Error("tmux control client exited");
+			const reason = this.exitReason || (signal ? `signal ${signal}` : `code ${code}`);
+			console.warn(`[vivarium] tmux control client exited (${reason})`);
+			const err = new Error(`tmux control client exited (${reason})`);
 			this.current?.reject(err);
 			this.current = null;
 			for (const p of this.queue) p.reject(err);
 			this.queue = [];
 			this.paneOutputOn.clear();
-			if (!this.disposed) {
-				// Reconnect lazily: listeners stay registered, next command reconnects.
-				setTimeout(() => this.ensureConnected().then(() => this.resubscribeAll()).catch(() => {}), 500);
-			}
+			// Listeners stay registered; reconnect (and keep trying if tmux is down for a moment).
+			if (!this.disposed) this.reconnectSoon(0);
 		});
 
 		try {
@@ -188,6 +208,25 @@ export class TmuxHub {
 		} finally {
 			this.connectingProc = null;
 		}
+		if (serverRestarted) {
+			console.warn("[vivarium] the tmux server was replaced (it crashed or was killed)");
+			window.setTimeout(() => this.onServerRestarted(), 0);
+		}
+	}
+
+	private reconnectSoon(attempt: number) {
+		if (this.disposed || this.reconnectTimer !== null || attempt > 20) return;
+		const delay = [500, 1000, 2000, 5000][Math.min(attempt, 3)];
+		this.reconnectTimer = window.setTimeout(() => {
+			this.reconnectTimer = null;
+			if (this.disposed || this.proc) return;
+			this.ensureConnected()
+				.then(() => this.resubscribeAll())
+				.catch((e) => {
+					console.warn("[vivarium] tmux reconnect failed", e);
+					this.reconnectSoon(attempt + 1);
+				});
+		}, delay);
 	}
 
 	private async resubscribeAll() {
@@ -205,7 +244,7 @@ export class TmuxHub {
 		const proc = this.proc;
 		// The control client died while connect() itself was talking to it: waiting for a
 		// reconnect here would wait on connect(), i.e. on ourselves.
-		if (!proc && this.connectingProc) return Promise.reject(new Error("tmux control client exited"));
+		if (!proc && this.connectingProc) return Promise.reject(new Error(`tmux control client exited${this.exitReason ? ` (${this.exitReason})` : ""}`));
 		if (!proc) return this.ensureConnected().then(() => this.cmdSeq(command));
 		return new Promise((resolve, reject) => {
 			const p: Pending = { resolve: (lines) => resolve({ lines, seq: p.seq ?? this.outputSeq }), reject, lines: [] };
@@ -288,6 +327,8 @@ export class TmuxHub {
 			return;
 		}
 		if (line.startsWith("%exit")) {
+			const reason = line.slice(5).trim();
+			if (reason) this.exitReason = reason;
 			this.proc?.kill();
 		}
 	}
@@ -509,6 +550,7 @@ export class TmuxHub {
 	dispose() {
 		this.disposed = true;
 		if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+		if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer);
 		// Detach only: the tmux server and every program keep running across Obsidian restarts.
 		this.proc?.stdin?.end();
 		this.proc?.kill();

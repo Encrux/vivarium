@@ -354,7 +354,10 @@ export default class VivariumPlugin extends Plugin {
 		if (!spec) return;
 		const surfaces = this.core.surfacesFor(spec.id);
 		if (surfaces.length) await surfaces[0].restart();
-		else await this.core.hub.respawn(spec.id, this.core.launch(spec), this.core.resolveCwd(spec.cwd));
+		else {
+			const { launch, cwd } = this.core.keeper.restartFor(spec);
+			await this.core.hub.respawn(spec.id, launch, cwd);
+		}
 	}
 
 	private async stopTile(f: TFile) {

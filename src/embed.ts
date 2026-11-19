@@ -18,6 +18,7 @@ async function mount(core: VivariumCore, parent: HTMLElement, file: TFile): Prom
 	const start = core.keeper.launchFor(spec); // fresh, or restored after a reboot
 	const surface = new TerminalSurface(core, parent, {
 		tileId: spec.id, launch: core.launch(spec), cwd: core.resolveCwd(spec.cwd), startLaunch: start.launch, startCwd: start.cwd,
+		relaunch: () => core.keeper.restartFor(spec),
 	});
 	surface.start();
 	return surface;

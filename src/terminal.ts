@@ -502,20 +502,15 @@ export class TerminalSurface {
 	async restart() {
 		this.hideOverlay();
 		const { launch, cwd } = this.opts.relaunch?.() ?? { launch: this.opts.launch, cwd: this.opts.cwd };
-		const p = this.core.hub.getPane(this.opts.tileId);
-		if (p) {
-			await this.core.hub.respawn(this.opts.tileId, launch, cwd);
-			this.term.reset();
-			this.lastSize = "";
-			this.scheduleFit();
-		} else {
-			this.detachStream();
-			this.pane = null;
-			this.term.reset();
-			this.opts.startLaunch = launch;
-			this.opts.startCwd = cwd;
-			await this.start();
-		}
+		// A new window for the program (see TmuxHub.respawn), started at this tile's size.
+		this.detachStream();
+		this.pane = null;
+		this.term.reset();
+		this.lastSize = "";
+		await this.core.hub.killWindow(this.opts.tileId);
+		this.opts.startLaunch = launch;
+		this.opts.startCwd = cwd;
+		await this.start();
 	}
 
 	dispose() {

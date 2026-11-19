@@ -451,13 +451,18 @@ export class TmuxHub {
 		await this.cmd(`send-keys -t ${tq(paneId)} Enter`);
 	}
 
-	async respawn(tileId: string, launch: Launch, cwd: string): Promise<void> {
+	/**
+	 * Start a tile's program again in a new window. Not `respawn-pane`: tmux before 3.8 crashes
+	 * (the whole server, every tile with it) when a respawned pane prints to a control-mode client
+	 * (tmux issue 5498; Ubuntu 26.04 ships 3.6a). The window keeps its name, so the tile finds it.
+	 */
+	async respawn(tileId: string, launch: Launch, cwd: string): Promise<PaneInfo | null> {
 		const pane = this.panes.get(tileId);
-		if (!pane) return;
-		await this.cmd(`respawn-pane -k -t ${tq(pane.paneId)} -c ${tq(cwd)} ${tq(launch.command)}`);
-		await this.typeIn(pane.paneId, launch);
-		pane.dead = false;
-		this.onPanesChanged();
+		if (!pane) return null;
+		const size = await this.cmd(`display-message -p -t ${tq(pane.windowId)} ${tq("#{window_width} #{window_height}")}`).catch(() => [] as string[]);
+		const [cols, rows] = (size[0] ?? "").split(" ").map((n) => parseInt(n, 10));
+		await this.killWindow(tileId);
+		return this.ensureWindow(tileId, launch, cwd, cols > 0 ? cols : 100, rows > 0 ? rows : 30);
 	}
 
 	async resize(pane: PaneInfo, cols: number, rows: number): Promise<void> {

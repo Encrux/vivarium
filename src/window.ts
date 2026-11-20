@@ -19,6 +19,7 @@
 import { Component, FileView, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type { VivariumCore } from "./core";
 import type { StreamConfig, StreamSink, VideoPacket, WindowInfo } from "./helper";
+import { LinuxWindowSurface } from "./linuxwindow";
 
 export const WINDOW_EXT = "window";
 export const WINDOW_VIEW_TYPE = "vivarium-window";
@@ -614,7 +615,7 @@ export class WindowSurface implements StreamSink {
 
 /** Canvas card / note embed for `.window` files. */
 export class WindowEmbed extends Component {
-	private surface: WindowSurface | null = null;
+	private surface: WindowSurface | LinuxWindowSurface | null = null;
 	private obs: MutationObserver | null = null;
 
 	constructor(private core: VivariumCore, private ctx: { containerEl: HTMLElement }, private file: TFile) {
@@ -643,7 +644,7 @@ export class WindowEmbed extends Component {
 			this.ctx.containerEl.createDiv({ cls: "vivarium-term-error", text: "App tiles need the Vivarium helper, which isn't built for this platform yet." });
 			return;
 		}
-		const surface = (this.surface = new WindowSurface(this.core, this.ctx.containerEl, spec, this.file));
+		const surface = (this.surface = makeSurface(this.core, this.ctx.containerEl, spec, this.file));
 		surface.host = {
 			normalizeZoom: () => {
 				const f = this.findNode();
@@ -681,7 +682,8 @@ export class WindowEmbed extends Component {
 				down = null;
 				if (!d || !(e.target instanceof HTMLElement) || !e.target.hasClass("canvas-node-content-blocker")) return;
 				if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4 || performance.now() - d.t > 500) return;
-				surface.engage({ x: e.clientX, y: e.clientY, button: 0, clicks: 1 });
+				// macOS: the real window comes over the tile. Linux: the tile is the window; the click selected the card.
+				if (surface instanceof WindowSurface) surface.engage({ x: e.clientX, y: e.clientY, button: 0, clicks: 1 });
 			}, { capture: true });
 			return true;
 		};
@@ -696,6 +698,11 @@ export class WindowEmbed extends Component {
 		this.surface?.dispose();
 		this.surface = null;
 	}
+}
+
+/** macOS: streamed real windows (this file). Linux: windows of the helper's own display (linuxwindow.ts). */
+function makeSurface(core: VivariumCore, parent: HTMLElement, spec: WindowSpec, file: TFile) {
+	return process.platform === "linux" ? new LinuxWindowSurface(core, parent, spec, file) : new WindowSurface(core, parent, spec, file);
 }
 
 export async function readWindowSpec(core: VivariumCore, file: TFile): Promise<WindowSpec | null> {
@@ -716,7 +723,7 @@ const rectClose = (a: R, b: R, tol: number) =>
 
 /** Opening a `.window` file in a tab shows the same live app. */
 export class WindowView extends FileView {
-	private surface: WindowSurface | null = null;
+	private surface: WindowSurface | LinuxWindowSurface | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private core: VivariumCore) {
 		super(leaf);
@@ -739,7 +746,7 @@ export class WindowView extends FileView {
 		this.contentEl.addClass("vivarium-view");
 		const spec = await readWindowSpec(this.core, file);
 		if (!spec || !this.core.helper) return;
-		this.surface = new WindowSurface(this.core, this.contentEl, spec, file);
+		this.surface = makeSurface(this.core, this.contentEl, spec, file);
 		this.surface.start();
 	}
 

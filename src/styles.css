@@ -76,6 +76,8 @@
 }
 .vivarium-window-banner span { flex: 1; }
 .vivarium-window.is-resizing .vivarium-window-canvas { object-fit: fill; }
+/* Linux: the picture is the window itself, always the tile's size (stretched only while resizing) */
+.vivarium-window.is-linux .vivarium-window-canvas { object-fit: fill; outline: none; }
 /* while the real window covers the tile, hide our chrome under it */
 .vivarium-window.is-engaged .vivarium-window-toolbar { display: none; }
 

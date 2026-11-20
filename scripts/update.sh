@@ -17,7 +17,7 @@ npm run build
 src=dev-vault/.obsidian/plugins/vivarium
 dest="$vault/.obsidian/plugins/vivarium"
 mkdir -p "$dest"
-for f in main.js manifest.json styles.css vivarium vivarium-helper-macos; do
+for f in main.js manifest.json styles.css vivarium SKILL.md vivarium-helper-macos; do
 	[ -e "$src/$f" ] && cp "$src/$f" "$dest/"
 done
 echo

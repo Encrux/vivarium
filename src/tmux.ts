@@ -112,6 +112,8 @@ export class TmuxHub {
 	onServerRestarted: () => void = () => {};
 	/** Exposed to programs as $VIVARIUM_VAULT so the CLI inside a tile talks to the right vault. */
 	vaultName = "";
+	/** Put first on every tile's PATH (where the vivarium CLI lives). */
+	pathPrefix = "";
 
 	constructor(private tmuxPath: string, private socket: string, private confPath: string) {}
 
@@ -411,7 +413,7 @@ export class TmuxHub {
 		// starts at its final size; then we pin it (window-size manual for that window only).
 		await this.cmd(`set-option -g default-size ${cols}x${rows}`).catch(() => {});
 		const lines = await this.cmd(
-			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} ${tq(launch.command)}`,
+			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
 		);
 		const [windowId, paneId] = (lines[0] ?? "").split(" ");
 		// Pin this window's size, so a terminal attaching to it (`vivarium attach`) doesn't resize it.

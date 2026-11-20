@@ -17,6 +17,7 @@ const ctx = await esbuild.context({
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	minify: prod,
+	loader: { ".md": "text" },
 	outdir,
 	plugins: [{
 		name: "copy-manifest",
@@ -24,6 +25,7 @@ const ctx = await esbuild.context({
 			fs.copyFileSync("manifest.json", `${outdir}/manifest.json`);
 			fs.copyFileSync("bin/vivarium", `${outdir}/vivarium`);
 			fs.chmodSync(`${outdir}/vivarium`, 0o755);
+			fs.copyFileSync("skill/SKILL.md", `${outdir}/SKILL.md`);
 			const mac = "helper/macos/.build/release/vivarium-helper";
 			if (fs.existsSync(mac)) {
 				// Replace, never overwrite in place: macOS caches code signatures per file and

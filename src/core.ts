@@ -6,6 +6,7 @@ import { TerminalSurface, themeFromCss } from "./terminal";
 import { HelperClient, helperBinary } from "./helper";
 import type { SemanticZoom } from "./zoom";
 import { SessionKeeper } from "./keeper";
+import { BIN_DIR } from "./agents";
 
 export interface Program {
 	name: string;
@@ -25,6 +26,10 @@ export interface VivariumSettings {
 	restoreLines: number;
 	optionIsMeta: boolean;
 	keepShellAfterExit: boolean;
+	/** Teach coding agents (Codex, Claude Code, …) the vivarium CLI with a skill (see agents.ts). */
+	agentSkill: boolean;
+	/** Let Codex run vivarium's read-only/canvas commands outside its sandbox without asking. */
+	codexRules: boolean;
 	tileWidth: number;
 	tileHeight: number;
 	programs: Program[];
@@ -41,6 +46,8 @@ export const DEFAULT_SETTINGS: VivariumSettings = {
 	restoreLines: 1000,
 	optionIsMeta: false,
 	keepShellAfterExit: true,
+	agentSkill: true,
+	codexRules: false,
 	tileWidth: 640,
 	tileHeight: 400,
 	programs: [
@@ -104,6 +111,7 @@ export class VivariumCore {
 			this.keeper.restoreAll("after tmux stopped unexpectedly").catch((e) => console.warn("[vivarium] restore", e));
 		};
 		hub.vaultName = this.app.vault.getName();
+		hub.pathPrefix = BIN_DIR; // the vivarium CLI, for programs and agents in tiles
 		return hub;
 	}
 

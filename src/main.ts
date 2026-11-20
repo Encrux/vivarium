@@ -5,6 +5,7 @@ import { Picked, ProgramPicker } from "./programs";
 import { WINDOW_EXT, WindowEmbed, WindowView, WINDOW_VIEW_TYPE } from "./window";
 import { WEB_EXT, WebEmbed, WebView, WEB_VIEW_TYPE } from "./web";
 import type { AppInfo, WindowInfo } from "./helper";
+import { installCli, syncCodexRules, syncSkill } from "./agents";
 import { ControlServer } from "./control";
 import { SemanticZoom } from "./zoom";
 import { hookTileLabel, renameTile } from "./label";
@@ -39,6 +40,7 @@ export default class VivariumPlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		const pluginDir = `${(this.app.vault.adapter as any).getBasePath()}/${this.manifest.dir}`;
 		this.core = new VivariumCore(this.app, this.settings, pluginDir);
+		this.setUpAgents(pluginDir);
 		this.zoom = new SemanticZoom(
 			(n) => [TILE_EXT, WINDOW_EXT, WEB_EXT].includes(n.file?.extension),
 			(f) => ([TILE_EXT, WINDOW_EXT, WEB_EXT].includes(f.extension) ? f.basename : null),
@@ -188,6 +190,21 @@ export default class VivariumPlugin extends Plugin {
 		this.control?.stop();
 		document.querySelectorAll(".vivarium-card-menu-button").forEach((el) => el.remove());
 		this.core.dispose();
+	}
+
+	/** The vivarium CLI on every tile's PATH, and a skill so coding agents know it (see agents.ts). */
+	private setUpAgents(pluginDir: string) {
+		try {
+			installCli(pluginDir);
+		} catch (e) {
+			console.warn("[vivarium] could not install the CLI", e);
+		}
+		const added = syncSkill(this.settings.agentSkill);
+		if (added.length && this.settings.agentSkill) {
+			const home = process.env.HOME ?? "";
+			this.core.notice(`coding agents in tiles can now use the vivarium CLI (skill in ${added.map((d) => d.replace(home, "~")).join(", ")}). Turn off in settings.`);
+		}
+		syncCodexRules(this.settings.codexRules);
 	}
 
 	/** Every tile card: name without the file ending, double-click the name to rename. */
@@ -421,6 +438,15 @@ class VivariumSettingTab extends PluginSettingTab {
 			.setName("Keep a shell after the program exits")
 			.setDesc("E.g. quitting Claude Code leaves you at a prompt in the same directory instead of a dead tile.")
 			.addToggle((t) => t.setValue(s.keepShellAfterExit).onChange((v) => ((s.keepShellAfterExit = v), save())));
+		new Setting(containerEl).setName("Coding agents").setHeading();
+		new Setting(containerEl)
+			.setName("Teach coding agents about Vivarium")
+			.setDesc("Installs a \"vivarium\" skill for Codex (~/.agents/skills) and Claude Code (~/.claude/skills), so agents in tiles can open tiles, fork their conversation and read other tiles. Costs agents one line of context until they use it.")
+			.addToggle((t) => t.setValue(s.agentSkill).onChange((v) => ((s.agentSkill = v), syncSkill(v), save())));
+		new Setting(containerEl)
+			.setName("Codex: no sandbox prompts for safe commands")
+			.setDesc("Codex's sandbox blocks the vivarium CLI, so it asks before each use. This lets ls, me, read, wait, note, fork, move and focus run without asking (~/.codex/rules/vivarium.rules). add, send, keys and rm still ask: they start or drive programs outside the sandbox.")
+			.addToggle((t) => t.setValue(s.codexRules).onChange((v) => ((s.codexRules = v), syncCodexRules(v), save())));
 		new Setting(containerEl)
 			.setName("Tile folder")
 			.setDesc("Where new .term tile files are created.")

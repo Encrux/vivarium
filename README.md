@@ -46,10 +46,15 @@ vivarium send t3k9x2a "npm test" --wait  # type a command, wait until it's done,
 vivarium read t3k9x2a --lines 50       # what does that program show?
 ```
 
-Run `vivarium setup` once: it tells Codex and Claude Code about the CLI (in `~/.codex/AGENTS.md`
-and `~/.claude/CLAUDE.md`), so they use it without exploring first. It also lets Codex run the
-read-only and canvas commands (`ls me read wait note fork move focus`) outside its sandbox
-without asking (`~/.codex/rules/vivarium.rules`). Commands that start or drive programs
+Agents need no setup. Every tile has `vivarium` on its PATH (`~/.vivarium/bin`, also linked into
+`~/.local/bin`). The plugin installs a `vivarium` [skill](https://agentskills.io) for Codex and
+other harnesses that read `~/.agents/skills`, and for Claude Code in `~/.claude/skills`. Agents
+pick it up when they're in a tile, and until then it costs them one line of context. You can turn
+this off in the settings.
+
+Codex's sandbox blocks the CLI (it needs Obsidian's socket and tmux), so Codex asks before each
+use. **Settings → Coding agents → Codex: no sandbox prompts for safe commands** lets
+`ls me read wait note fork move focus` run without asking. Commands that start or drive programs
 (`add send keys rm`) still ask.
 
 ### Big workspaces stay readable
@@ -93,10 +98,10 @@ npm run build          # → dev-vault/.obsidian/plugins/vivarium/
 
 # link it into your vault and enable "Vivarium" under Settings → Community plugins
 ln -s "$PWD/dev-vault/.obsidian/plugins/vivarium" "<your vault>/.obsidian/plugins/vivarium"
-
-# optional: the CLI for agents
-ln -s "$PWD/bin/vivarium" /opt/homebrew/bin/vivarium
 ```
+
+The `vivarium` CLI and the agent skill install themselves when the plugin loads. To update later:
+`sh scripts/update.sh <your vault>`.
 
 ## Using it
 

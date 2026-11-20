@@ -35,9 +35,9 @@ Ids look like t3k9x2a. Without one, commands act on your own tile (except rm).
   move ID X,Y [WxH] | focus ID | rm ID | attach ID
 
   --near ID: place next to another tile instead of yours.  --vault NAME if several vaults run it.
-  --json: raw output.  One-time agent setup (instructions + Codex rules): vivarium setup`;
+  --json: raw output.  Without the Obsidian plugin: vivarium setup [--codex-rules] [--remove]`;
 
-const BOOL = new Set(["no-edge", "no-enter", "json", "help", "all", "wait", "dry-run"]);
+const BOOL = new Set(["no-edge", "no-enter", "json", "help", "all", "wait", "remove", "codex-rules"]);
 function parse(argv) {
 	const flags = {}, pos = [];
 	for (let i = 0; i < argv.length; i++) {
@@ -80,7 +80,7 @@ function rpc(vault, req) {
 			res.ok ? resolve(res) : reject(new Error(res.error));
 		});
 		s.on("error", (e) => {
-			if (e.code === "EPERM" || e.code === "EACCES") reject(new Error("blocked by a sandbox: run this command outside it (Codex: `vivarium setup`, or approve it)"));
+			if (e.code === "EPERM" || e.code === "EACCES") reject(new Error("blocked by a sandbox: run this command outside it (approve it, or turn on Codex: no sandbox prompts in Vivarium settings)"));
 			else reject(new Error(e.code === "ECONNREFUSED" || e.code === "ENOENT" ? "Obsidian isn't running Vivarium for this vault" : e.message));
 		});
 	});
@@ -95,7 +95,7 @@ function tmux(...args) {
 	try { return execFileSync(TMUX, ["-L", SOCKET, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
 	catch (e) {
 		const msg = (e.stderr || e.message).trim();
-		if (/Operation not permitted|Permission denied/.test(msg)) die("blocked by a sandbox: run this command outside it (Codex: `vivarium setup`, or approve it)");
+		if (/Operation not permitted|Permission denied/.test(msg)) die("blocked by a sandbox: run this command outside it (approve it, or turn on Codex: no sandbox prompts in Vivarium settings)");
 		if (/no server running|error connecting/.test(msg)) die("no tiles are running (Vivarium's tmux isn't up)");
 		die(msg);
 	}
@@ -183,61 +183,50 @@ function printWait(r, flags) {
 }
 
 // ---------- setup ----------
+// The Obsidian plugin does this on its own (Settings → Vivarium → Coding agents); `vivarium setup`
+// is for machines where you use the CLI without it, or to add the Codex rule from a terminal.
 
-const AGENT_DOC = `<!-- vivarium -->
-## Vivarium tiles
-If $VIVARIUM_TILE is set, you run in a tile on the user's Obsidian canvas. Use the \`vivarium\` CLI directly (no need to run help or ls first; without an id it means your own tile):
-- \`vivarium add [--title T] -- <cmd>\`: new program tile next to yours, with an arrow; prints its id
-- \`vivarium fork [prompt]\`: continue this conversation in a new tile next to yours
-- \`vivarium note "<text>"\`: text card next to your tile
-- \`vivarium send <id> "<text>" --wait\`: type + Enter, wait until done, print its screen
-- \`vivarium read <id>\` / \`vivarium wait <id>\`: a tile's screen / wait until it's done
-- \`vivarium ls\`: tiles (yours is marked); \`vivarium help\` for the rest
-<!-- /vivarium -->
-`;
-
-// Commands that only read, or only touch the canvas/your own conversation, run without a sandbox
-// prompt. add / send / keys / rm / attach start or drive programs, so Codex still asks for those.
-const CODEX_RULES = `# Written by \`vivarium setup\`. Lets Codex run these vivarium commands outside its sandbox
-# without asking (they need Obsidian's socket / tmux, which the sandbox blocks). Commands that
-# start or drive programs (add, send, keys, rm, attach) still ask.
+const CODEX_RULES = `# Written by the Vivarium plugin (Settings → Vivarium → Agents). Lets Codex run these vivarium
+# commands outside its sandbox without asking: they need Obsidian's socket and tmux, which the
+# sandbox blocks. Commands that start or drive programs (add, send, keys, rm, attach) still ask.
 prefix_rule(
     pattern = ["vivarium", ["ls", "me", "read", "wait", "note", "fork", "move", "focus", "help"]],
     decision = "allow",
     justification = "Vivarium canvas: read tiles, add notes, fork this conversation",
 )
 `;
-
-function upsertBlock(file, block) {
-	let text = "";
-	try { text = fs.readFileSync(file, "utf8"); } catch {}
-	const re = /<!-- vivarium -->[\s\S]*?<!-- \/vivarium -->\n?/;
-	const next = re.test(text) ? text.replace(re, block) : (text && !text.endsWith("\n\n") ? text.replace(/\n?$/, "\n\n") : text) + block;
-	if (next === text) return "unchanged";
-	fs.mkdirSync(path.dirname(file), { recursive: true });
-	fs.writeFileSync(file, next);
-	return text ? "updated" : "created";
-}
+const MARKER = ".installed-by-vivarium";
 
 function setup(flags) {
 	const home = os.homedir();
-	const plan = [
-		[path.join(home, ".codex", "AGENTS.md"), () => upsertBlock(path.join(home, ".codex", "AGENTS.md"), AGENT_DOC), "tells Codex about the CLI"],
-		[path.join(home, ".codex", "rules", "vivarium.rules"), () => {
-			const f = path.join(home, ".codex", "rules", "vivarium.rules");
-			const old = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null;
-			if (old === CODEX_RULES) return "unchanged";
-			fs.mkdirSync(path.dirname(f), { recursive: true });
-			fs.writeFileSync(f, CODEX_RULES);
-			return old === null ? "created" : "updated";
-		}, "lets Codex run ls/me/read/wait/note/fork/move/focus without sandbox prompts"],
-		[path.join(home, ".claude", "CLAUDE.md"), () => upsertBlock(path.join(home, ".claude", "CLAUDE.md"), AGENT_DOC), "tells Claude Code about the CLI"],
-	];
-	for (const [file, run, why] of plan) {
-		const res = flags["dry-run"] ? "would write" : run();
-		console.log(`${res.padEnd(11)} ${file.replace(home, "~")}  (${why})`);
+	const tilde = (f) => f.replace(home, "~");
+	const skill = [path.join(__dirname, "SKILL.md"), path.join(__dirname, "..", "skill", "SKILL.md")].find((f) => fs.existsSync(f));
+	const remove = !!flags.remove;
+	for (const dir of [path.join(home, ".agents", "skills", "vivarium"), path.join(home, ".claude", "skills", "vivarium")]) {
+		const ours = fs.existsSync(path.join(dir, MARKER));
+		if (fs.existsSync(dir) && !ours) { console.log(`skipped  ${tilde(dir)} (a skill of yours with the same name)`); continue; }
+		if (remove) { if (ours) { fs.rmSync(dir, { recursive: true, force: true }); console.log(`removed  ${tilde(dir)}`); } continue; }
+		if (!skill) die("SKILL.md not found next to the CLI");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.copyFileSync(skill, path.join(dir, "SKILL.md"));
+		fs.writeFileSync(path.join(dir, MARKER), "This folder is managed by the Vivarium Obsidian plugin.\n");
+		console.log(`skill    ${tilde(dir)}`);
 	}
-	if (!flags["dry-run"]) console.log("Restart running Codex / Claude Code sessions to pick this up.");
+	const rules = path.join(home, ".codex", "rules", "vivarium.rules");
+	if (flags["codex-rules"] && !remove) {
+		fs.mkdirSync(path.dirname(rules), { recursive: true });
+		fs.writeFileSync(rules, CODEX_RULES);
+		console.log(`rule     ${tilde(rules)} (Codex runs ls/me/read/wait/note/fork/move/focus without asking)`);
+	} else if (remove && fs.existsSync(rules) && fs.readFileSync(rules, "utf8").includes("Written by the Vivarium plugin")) {
+		fs.unlinkSync(rules);
+		console.log(`removed  ${tilde(rules)}`);
+	}
+	// earlier versions wrote a block into these instead of a skill
+	for (const f of [path.join(home, ".codex", "AGENTS.md"), path.join(home, ".claude", "CLAUDE.md")]) {
+		let t; try { t = fs.readFileSync(f, "utf8"); } catch { continue; }
+		const n = t.replace(/\n*<!-- vivarium -->[\s\S]*?<!-- \/vivarium -->\n?/, "\n");
+		if (n !== t) { n.trim() ? fs.writeFileSync(f, n.replace(/\n+$/, "\n")) : fs.unlinkSync(f); console.log(`cleaned  ${tilde(f)} (old instructions block; the skill replaces it)`); }
+	}
 }
 
 // ---------- commands ----------

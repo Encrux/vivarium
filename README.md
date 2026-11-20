@@ -13,7 +13,7 @@ They keep running when you close the canvas or quit Obsidian.
 
 > [!NOTE]
 > This project was built for personal use. The highest priority was a working prototype, quickly,
-> so AI was used extensively. Expect rough edges.
+> so AI was used extensively. If that makes you uncomfortable, please don't use it.
 
 ## Features
 
@@ -88,7 +88,7 @@ the tile files.
 
 | Platform | Support |
 |---|---|
-| macOS 14+ | Supported |
+| macOS 14+ | Supported* |
 | Linux (Wayland) | Supported, tested on Ubuntu 26.04 |
 | Windows | Not supported, no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)) |
 | Obsidian mobile | Not supported |
@@ -119,4 +119,4 @@ Ideas, not scheduled. Comments welcome on the issues.
 - [How it works](docs/how-it-works.md): architecture, performance, crash recovery, git details, caveats
 - [Contributing](CONTRIBUTING.md): building, testing, the helpers
 
-<sub>Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>.</sub>
+<sub>*Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>. If you're using MacOS, your experience will be much better using Campus</sub>

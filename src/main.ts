@@ -5,7 +5,7 @@ import { Picked, ProgramPicker } from "./programs";
 import { WINDOW_EXT, WindowEmbed, WindowView, WINDOW_VIEW_TYPE } from "./window";
 import { WEB_EXT, WebEmbed, WebView, WEB_VIEW_TYPE } from "./web";
 import type { AppInfo, WindowInfo } from "./helper";
-import { installCli, syncCodexRules, syncSkill } from "./agents";
+import { installCli, lingerEnabled, syncCodexRules, syncSkill } from "./agents";
 import { ControlServer } from "./control";
 import { SemanticZoom } from "./zoom";
 import { hookTileLabel, renameTile } from "./label";
@@ -439,6 +439,21 @@ class VivariumSettingTab extends PluginSettingTab {
 			.setName("Keep a shell after the program exits")
 			.setDesc("E.g. quitting Claude Code leaves you at a prompt in the same directory instead of a dead tile.")
 			.addToggle((t) => t.setValue(s.keepShellAfterExit).onChange((v) => ((s.keepShellAfterExit = v), save())));
+		if (process.platform === "linux") {
+			const linger = lingerEnabled();
+			new Setting(containerEl)
+				.setName("Keep programs running when you log out")
+				.setDesc(
+					"Starts tmux in its own systemd scope instead of Obsidian's, so logging out doesn't end your tiles' programs. " +
+						(linger === false
+							? "Also needs lingering, which is off: run `loginctl enable-linger` once. Without it, programs still end at logout, and come back (agents with their conversation) when Obsidian starts."
+							: linger
+								? "Lingering is on, so this works."
+								: "Also needs lingering (`loginctl enable-linger`).") +
+						" Takes effect the next time tmux starts.",
+				)
+				.addToggle((t) => t.setValue(s.ownScope).onChange((v) => ((s.ownScope = v), save())));
+		}
 		new Setting(containerEl).setName("Coding agents").setHeading();
 		new Setting(containerEl)
 			.setName("Teach coding agents about Vivarium")

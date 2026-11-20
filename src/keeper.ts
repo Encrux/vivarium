@@ -22,8 +22,23 @@ export interface RunState {
 	running?: boolean;
 	fg?: "shell" | "agent" | "program";
 	cwd?: string;
+	/** The last coding-agent conversation this tile ran (kept after the agent ends: see agentAt). */
 	agent?: { kind: "claude" | "codex"; sessionId: string };
+	/** When that agent was last seen running (ms), and its process. */
+	agentAt?: number;
+	agentPid?: number;
+	/** When the tile's pane was first seen dead (ms). */
+	diedAt?: number;
 }
+
+/**
+ * Logging out or shutting down doesn't end everything at once: an agent may be killed a moment
+ * before its shell, or a pane a few seconds before tmux. Whatever ended this close to the last
+ * time we looked (see LAST_TICK_KEY) ended with the session, not because you quit it.
+ */
+const ENDED_WITH_SESSION_MS = 45_000;
+const LAST_TICK_KEY = "vivarium-keeper-last-tick";
+const validAgent = (st: Partial<RunState>) => !!st.agent && /^[\w-]{8,}$/.test(st.agent.sessionId);
 
 const TICK_MS = 10_000;
 const SNAPSHOT_MS = 30_000;
@@ -64,21 +79,31 @@ export class SessionKeeper {
 		this.busy = true;
 		try {
 			const [rows, tree] = await Promise.all([hub.listPaneInfo(), processTree()]);
+			const now = Date.now();
 			for (const r of rows) {
 				const prev = this.core.tileState<RunState>(r.tileId);
-				const agent = r.dead ? null : await findAgent(r.panePid, tree);
+				let agent = r.dead ? null : await findAgent(r.panePid, tree);
+				// Codex is found through files it has open, which a tick can miss: the same process
+				// still running below this pane is still that conversation
+				if (!agent && !r.dead && prev.agent && prev.agentPid && isBelow(prev.agentPid, r.panePid, tree)) agent = { ...prev.agent, pid: prev.agentPid };
 				const fg: RunState["fg"] = r.dead ? undefined : agent ? "agent" : SHELLS.has(path.basename(r.command).replace(/^-/, "")) ? "shell" : "program";
+				// The conversation is kept when the agent ends: whether to resume it is decided later,
+				// from how long before the end it stopped (see agentToResume).
 				const next: RunState = {
 					running: !r.dead,
 					fg,
 					cwd: r.cwd || prev.cwd,
-					// A dead pane keeps the conversation it last ran, so "Restart" can resume it.
-					agent: agent ?? (r.dead ? prev.agent : undefined),
+					agent: agent ? { kind: agent.kind, sessionId: agent.sessionId } : prev.agent,
+					agentAt: agent ? now : prev.agentAt,
+					agentPid: agent ? agent.pid : prev.agentPid,
+					diedAt: r.dead ? prev.diedAt ?? now : undefined,
 				};
-				if (JSON.stringify(next) !== JSON.stringify({ running: prev.running, fg: prev.fg, cwd: prev.cwd, agent: prev.agent })) {
+				const keys: (keyof RunState)[] = ["running", "fg", "cwd", "agent", "agentAt", "agentPid", "diedAt"];
+				if (keys.some((k) => JSON.stringify(next[k]) !== JSON.stringify(prev[k]))) {
 					this.core.setTileState(r.tileId, next as Record<string, unknown>);
 				}
 			}
+			this.core.app.saveLocalStorage(LAST_TICK_KEY, now);
 		} catch (e) {
 			console.debug("[vivarium] keeper tick", e);
 		} finally {
@@ -109,7 +134,7 @@ export class SessionKeeper {
 
 	/** Forget a tile you stopped on purpose: it must not come back after a restart. */
 	forget(tileId: string) {
-		this.core.setTileState(tileId, { running: false, fg: undefined, agent: undefined });
+		this.core.setTileState(tileId, { running: false, fg: undefined, agent: undefined, agentAt: undefined, agentPid: undefined, diedAt: undefined });
 		this.lastSnap.delete(tileId);
 		try {
 			fs.unlinkSync(this.snapPath(tileId));
@@ -120,13 +145,13 @@ export class SessionKeeper {
 	 * How to start a tile whose tmux window doesn't exist. Normally: fresh. If it was running
 	 * when the machine went down: restored (see file header).
 	 */
-	launchFor(spec: TileSpec): { launch: Launch; cwd: string; restored: boolean } {
+	launchFor(spec: TileSpec, end = this.lastTick()): { launch: Launch; cwd: string; restored: boolean } {
 		const fresh = { launch: this.core.launch(spec), cwd: this.core.resolveCwd(spec.cwd), restored: false };
 		const st = this.core.tileState<RunState>(spec.id);
-		if (!st.running) return fresh;
+		if (!wasRunningAtEnd(st, end)) return fresh;
 		const shell = process.env.SHELL || "/bin/zsh";
 		const cwd = st.cwd && fs.existsSync(st.cwd) ? st.cwd : fresh.cwd;
-		const resume = st.fg === "agent" && st.agent && /^[\w-]{8,}$/.test(st.agent.sessionId) ? resumeCommand(spec.command.trim(), st.agent) : null;
+		const resume = agentToResume(st, end) ? resumeCommand(spec.command.trim(), st.agent!) : null;
 		if (resume) return { launch: { command: `${shell} -l`, typeIn: resume }, cwd, restored: true };
 		const snap = this.snapPath(spec.id);
 		const replay = fs.existsSync(snap) ? `cat ${q(snap)}; printf '\\n\\033[2m── restored after restart ──\\033[0m\\n\\n'; ` : "";
@@ -144,11 +169,19 @@ export class SessionKeeper {
 	restartFor(spec: TileSpec): { launch: Launch; cwd: string } {
 		const fresh = { launch: this.core.launch(spec), cwd: this.core.resolveCwd(spec.cwd) };
 		const st = this.core.tileState<RunState>(spec.id);
-		const resume = st.agent && /^[\w-]{8,}$/.test(st.agent.sessionId) ? resumeCommand(spec.command.trim(), st.agent) : null;
+		// a crashed tile: the agent it ran up to the crash; a running one: the agent it runs now
+		const resume = agentToResume(st, st.diedAt ?? Date.now()) ? resumeCommand(spec.command.trim(), st.agent!) : null;
 		if (!resume) return fresh;
 		const shell = process.env.SHELL || "/bin/zsh";
 		const cwd = st.cwd && fs.existsSync(st.cwd) ? st.cwd : fresh.cwd;
+		this.core.setTileState(spec.id, { agentAt: Date.now(), diedAt: undefined });
 		return { launch: { command: `${shell} -l`, typeIn: resume }, cwd };
+	}
+
+	/** When the keeper last looked at the tiles (in this or the previous Obsidian session). */
+	lastTick(): number {
+		const t = Number(this.core.app.loadLocalStorage(LAST_TICK_KEY));
+		return Number.isFinite(t) && t > 0 ? t : 0;
 	}
 
 	/** What a tile runs right now: its folder and coding agent (looked up fresh, not from the last tick). */
@@ -156,17 +189,19 @@ export class SessionKeeper {
 		const [rows, tree] = await Promise.all([this.core.hub.listPaneInfo(), processTree()]);
 		const r = rows.find((x) => x.tileId === tileId);
 		if (!r) return null;
-		return { cwd: r.cwd, agent: r.dead ? null : await findAgent(r.panePid, tree) };
+		const a = r.dead ? null : await findAgent(r.panePid, tree);
+		return { cwd: r.cwd, agent: a && { kind: a.kind, sessionId: a.sessionId } };
 	}
 
 	/** On startup, or after the tmux server died: bring back every tile that was running, without waiting for its canvas. */
 	async restoreAll(why = "after restart") {
+		const end = this.lastTick(); // read before any tick of this session overwrites it
 		const files = this.core.app.vault.getFiles().filter((f) => f.extension === "term");
 		const wanted: TileSpec[] = [];
 		for (const f of files) {
 			const spec = await this.core.readSpec(f);
 			// a command that changed through a sync since it last ran here waits for Start (core.trust)
-			if (spec && this.core.tileState<RunState>(spec.id).running && this.core.isTrusted(spec)) wanted.push(spec);
+			if (spec && wasRunningAtEnd(this.core.tileState<RunState>(spec.id), end) && this.core.isTrusted(spec)) wanted.push(spec);
 		}
 		if (!wanted.length || !this.core.tmuxAvailable()) return;
 		await this.core.hub.ensureConnected();
@@ -174,12 +209,36 @@ export class SessionKeeper {
 		let n = 0;
 		for (const spec of wanted) {
 			if (this.core.hub.getPane(spec.id)) continue; // still alive (Obsidian restart only)
-			const { launch, cwd } = this.launchFor(spec);
+			const resuming = agentToResume(this.core.tileState<RunState>(spec.id), end);
+			const { launch, cwd } = this.launchFor(spec, end);
 			await this.core.hub.ensureWindow(spec.id, launch, cwd, 120, 36).catch((e) => console.warn("[vivarium] restore", e));
+			// Running again. A resumed agent counts as running from now on, so if this restore is cut
+			// short before the agent is up (another logout, a crash), the next one still resumes it.
+			this.core.setTileState(spec.id, resuming ? { running: true, diedAt: undefined, agentAt: Date.now() } : { running: true, diedAt: undefined });
 			n++;
 		}
 		if (n) this.core.notice(`restored ${n} program${n === 1 ? "" : "s"} ${why}`);
 	}
+}
+
+/** `t` is at most ENDED_WITH_SESSION_MS before `end` (both known). */
+const nearEnd = (t: number | undefined, end: number) => !!t && !!end && end - t <= ENDED_WITH_SESSION_MS;
+
+/**
+ * Should the tile come back after a restart? If it was running, or its program ended in the last
+ * moments before the end (logout / shutdown killed it, not you).
+ */
+export function wasRunningAtEnd(st: Partial<RunState>, end: number): boolean {
+	return !!st.running || nearEnd(st.diedAt, end);
+}
+
+/**
+ * Should the tile's last agent conversation be resumed? If the agent was in the foreground, or was
+ * still running shortly before `end` (it was killed a moment before its shell or the pane).
+ * An agent you quit earlier, leaving a shell, isn't brought back.
+ */
+export function agentToResume(st: Partial<RunState>, end: number): boolean {
+	return validAgent(st) && (st.fg === "agent" || nearEnd(st.agentAt, end));
 }
 
 type Tree = Map<number, { ppid: number; comm: string }>;
@@ -234,7 +293,18 @@ const CODEX_OPEN_FILE = [
  *     runs, so we ask the OS which files the codex process has open. Before your first message
  *     there is no transcript yet, and nothing to resume either.
  */
-async function findAgent(rootPid: number, tree: Tree): Promise<RunState["agent"] | null> {
+type Found = NonNullable<RunState["agent"]> & { pid: number };
+
+/** `pid` is `rootPid` or one of its descendants. */
+function isBelow(pid: number, rootPid: number, tree: Tree): boolean {
+	for (let p: number | undefined = pid, guard = 0; p && guard < 200; guard++) {
+		if (p === rootPid) return true;
+		p = tree.get(p)?.ppid;
+	}
+	return false;
+}
+
+async function findAgent(rootPid: number, tree: Tree): Promise<Found | null> {
 	const children = new Map<number, number[]>();
 	for (const [pid, p] of tree) (children.get(p.ppid) ?? children.set(p.ppid, []).get(p.ppid)!).push(pid);
 	const dir = path.join(os.homedir(), ".claude", "sessions");
@@ -245,7 +315,7 @@ async function findAgent(rootPid: number, tree: Tree): Promise<RunState["agent"]
 		if (pid !== rootPid) {
 			try {
 				const d = JSON.parse(fs.readFileSync(path.join(dir, `${pid}.json`), "utf8"));
-				if (typeof d.sessionId === "string") return { kind: "claude", sessionId: d.sessionId };
+				if (typeof d.sessionId === "string") return { kind: "claude", sessionId: d.sessionId, pid };
 			} catch {}
 			if (path.basename(tree.get(pid)?.comm ?? "") === "codex") codex.push(pid);
 		}
@@ -256,7 +326,7 @@ async function findAgent(rootPid: number, tree: Tree): Promise<RunState["agent"]
 		for (const re of CODEX_OPEN_FILE) {
 			for (const f of files) {
 				const m = re.exec(f);
-				if (m) return { kind: "codex", sessionId: m[1].toLowerCase() };
+				if (m) return { kind: "codex", sessionId: m[1].toLowerCase(), pid };
 			}
 		}
 	}

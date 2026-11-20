@@ -81,6 +81,11 @@ when cards become specks:
 
   Tiles you stopped on purpose stay stopped. Snapshots of recent output are kept per device in
   `~/.vivarium/snapshots/` (mode 0600), never in the vault.
+- **Logging out (Linux)** ends your programs like a reboot does, and they come back the same way.
+  Logout kills processes in no particular order (an agent may die a moment before its shell), so
+  anything that ended in the last 45 seconds before the end counts as ended by the logout. To
+  keep programs *running* through a logout instead: Vivarium starts tmux in its own systemd scope
+  (setting "Keep programs running when you log out"), and you run `loginctl enable-linger` once.
 - **Even tmux crashing is survivable.** If the tmux server dies, Vivarium reconnects and brings
   back what was running the same way.
 - **Attach from anywhere:** `tmux -L vivarium attach -t vivarium:<id>`, or `vivarium attach`.

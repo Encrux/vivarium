@@ -114,6 +114,12 @@ export class TmuxHub {
 	vaultName = "";
 	/** Put first on every tile's PATH (where the vivarium CLI lives). */
 	pathPrefix = "";
+	/**
+	 * Linux: start the tmux server in its own systemd user scope instead of inside Obsidian's
+	 * (the desktop puts each app in a scope, and stops it when you log out). With lingering
+	 * enabled (`loginctl enable-linger`) programs then keep running after you log out.
+	 */
+	ownScope = false;
 
 	constructor(private tmuxPath: string, private socket: string, private confPath: string) {}
 
@@ -125,6 +131,17 @@ export class TmuxHub {
 	exec(...a: string[]): Promise<string> {
 		return new Promise((resolve, reject) => {
 			execFile(this.tmuxPath, this.args(...a), { env: this.env() }, (err, stdout, stderr) => {
+				if (err) reject(new Error(stderr || err.message));
+				else resolve(stdout);
+			});
+		});
+	}
+
+	/** Run tmux in a fresh transient systemd user scope (see ownScope). */
+	private execScoped(a: string[]): Promise<string> {
+		const unit = `vivarium-tmux-${this.socket.replace(/[^\w-]/g, "_")}-${Date.now()}`;
+		return new Promise((resolve, reject) => {
+			execFile("systemd-run", ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, this.tmuxPath, ...this.args(...a)], { env: this.env(), timeout: 10_000 }, (err, stdout, stderr) => {
 				if (err) reject(new Error(stderr || err.message));
 				else resolve(stdout);
 			});
@@ -154,10 +171,23 @@ export class TmuxHub {
 		// Create the session (idempotently) with a placeholder window so the session survives
 		// when every tile is closed.
 		// (-A on an existing session acts like attach and fails without a terminal: that's fine.)
-		const created = await this.exec("new-session", "-A", "-d", "-s", SESSION, "-n", HUB_WINDOW, "sh -c 'while :; do sleep 86400; done'").then(
-			() => "",
-			(e: Error) => e.message.trim(),
-		);
+		const newSession = ["new-session", "-A", "-d", "-s", SESSION, "-n", HUB_WINDOW, "sh -c 'while :; do sleep 86400; done'"];
+		let created = "";
+		const running = this.ownScope && (await this.exec("has-session", "-t", SESSION).then(() => true, () => false));
+		if (this.ownScope && !running) {
+			// the server forks from this client, so it lands in the new scope; fall back to a plain start
+			created = await this.execScoped(newSession).then(
+				() => "",
+				(e: Error) => e.message.trim(),
+			);
+			if (created) console.warn("[vivarium] systemd-run failed, starting tmux normally:", created);
+		}
+		if (!this.ownScope || created) {
+			created = await this.exec(...newSession).then(
+				() => "",
+				(e: Error) => e.message.trim(),
+			);
+		}
 		// If the session doesn't exist now, tmux itself failed (e.g. its server crashed on start):
 		// say so, rather than leaving tiles waiting on a server that isn't there.
 		await this.exec("has-session", "-t", SESSION).catch(() => {

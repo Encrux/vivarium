@@ -30,6 +30,8 @@ export interface VivariumSettings {
 	agentSkill: boolean;
 	/** Let Codex run vivarium's read-only/canvas commands outside its sandbox without asking. */
 	codexRules: boolean;
+	/** Linux: run tmux in its own systemd scope, so programs can outlive your login (see TmuxHub.ownScope). */
+	ownScope: boolean;
 	tileWidth: number;
 	tileHeight: number;
 	programs: Program[];
@@ -48,6 +50,7 @@ export const DEFAULT_SETTINGS: VivariumSettings = {
 	keepShellAfterExit: true,
 	agentSkill: true,
 	codexRules: false,
+	ownScope: true,
 	tileWidth: 640,
 	tileHeight: 400,
 	programs: [
@@ -112,6 +115,7 @@ export class VivariumCore {
 		};
 		hub.vaultName = this.app.vault.getName();
 		hub.pathPrefix = BIN_DIR; // the vivarium CLI, for programs and agents in tiles
+		hub.ownScope = process.platform === "linux" && this.settings.ownScope;
 		return hub;
 	}
 

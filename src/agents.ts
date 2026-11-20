@@ -120,3 +120,10 @@ export function syncCodexRules(on: boolean) {
 		console.warn("[vivarium] codex rules", e);
 	}
 }
+
+/** Linux: whether systemd keeps this user's services running after logout (`loginctl enable-linger`). null = can't tell. */
+export function lingerEnabled(): boolean | null {
+	const user = os.userInfo().username;
+	if (!fs.existsSync("/var/lib/systemd/linger")) return null;
+	return fs.existsSync(`/var/lib/systemd/linger/${user}`);
+}

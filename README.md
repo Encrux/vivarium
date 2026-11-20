@@ -137,23 +137,36 @@ Prefer **web tiles** for anything that runs in a browser: they're instant and ne
 
 ## Vaults in git (or synced)
 
-Tiles are plain text and safe to commit. A `.term` file is a recipe (command, title, working
-folder), not the running program, so cloning a vault re-launches its programs fresh on the other
-machine:
+Committing tiles is safe, and it's a good way to back up your canvases. A tile file is a recipe
+(command, title, folder), not the running program:
 
-| File | Holds | On another machine |
-|---|---|---|
-| `.term` | `command`, `title`, `cwd` (vault-relative, `~/…`, or absolute) | starts the command fresh, with no history; falls back to `~` if the folder doesn't exist |
-| `.web` | the page the tile is *for* | opens that page; logins stay on each device |
-| `.window` | which app (bundle id) | macOS: opens a window of that app |
+| File | Holds |
+|---|---|
+| `.term` | `command`, `title`, `cwd` (vault-relative, `~/…`, or absolute) |
+| `.web` | the page the tile is *for* |
+| `.window` | which app (bundle id) |
 
-Tile files only change when **you** change a tile. Things that differ per machine, like which app
-window a tile shows or the page you browsed to, live in Obsidian's per-device storage, never in the
-vault, so syncing or auto-committing a vault doesn't produce a stream of noise. (Typing a new
-address into a web tile's address bar *is* a change to the tile, so that one is saved.)
+**Nothing runs just because a file arrived.** A terminal tile starts by itself only on a device
+where it was created, or where you pressed its **Start** button once. That button shows exactly
+what would run and where. If a pull or sync changes a tile's command, it asks again. So a
+`git pull`, a shared folder or a compromised sync can't run commands on your machine by putting
+tiles in your vault.
 
-> **Don't put secrets in tile commands.** They're stored verbatim in the `.term` file. Use your
-> shell's environment (`.zshrc`, a secrets manager) instead.
+Running state never goes into the vault, so committing doesn't produce noise. That includes
+scrollback, snapshots, agent sessions, logins and which window a tile shows. All of it stays per
+device: in `~/.vivarium/` and Obsidian's local storage. A tile file only changes when you change
+the tile. Typing a new address into a web tile *is* such a change, so that one is saved.
+
+Vivarium is built for one machine. On another machine the canvas looks the same, but a coding
+agent starts a fresh conversation there. To keep tiles out of git entirely, add to `.gitignore`:
+
+```gitignore
+Vivarium/          # tile files (the canvases then show missing-file cards elsewhere)
+```
+
+> **Don't put secrets in tiles.** Commands are stored verbatim in `.term` files, and web tiles
+> store their URL (watch out for `?token=…` links, e.g. Jupyter). Use your shell's environment
+> (`.zshrc`, a secrets manager) instead.
 
 ## How it works
 

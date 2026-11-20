@@ -19,6 +19,12 @@ async function mount(core: VivariumCore, parent: HTMLElement, file: TFile): Prom
 	const surface = new TerminalSurface(core, parent, {
 		tileId: spec.id, launch: core.launch(spec), cwd: core.resolveCwd(spec.cwd), startLaunch: start.launch, startCwd: start.cwd,
 		relaunch: () => core.keeper.restartFor(spec),
+		consent: {
+			needed: () => !core.isTrusted(spec),
+			grant: () => core.trust(spec),
+			command: spec.command.trim() || "login shell",
+			cwd: start.cwd,
+		},
 	});
 	surface.start();
 	return surface;

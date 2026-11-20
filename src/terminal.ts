@@ -33,6 +33,8 @@ export interface SurfaceOptions {
 	relaunch?: () => { launch: Launch; cwd: string };
 	cwd: string;
 	tileId: string;
+	/** Ask before starting a tile this device hasn't run (e.g. it arrived by git pull). */
+	consent?: { needed: () => boolean; grant: () => void; command: string; cwd: string };
 }
 
 export class TerminalSurface {
@@ -127,6 +129,12 @@ export class TerminalSurface {
 	async start(): Promise<void> {
 		// Wait until we're laid out so a new program starts at the tile's real size (no initial
 		// reflow, no zsh "%" partial-line marker). Existing tmux windows don't care.
+		const consent = this.opts.consent;
+		if (consent?.needed()) {
+			// Already running here (e.g. started from the CLI)? Then just show it.
+			const running = await this.core.hub.ensureConnected().then(() => this.core.hub.refreshPanes()).then(() => !!this.core.hub.getPane(this.opts.tileId), () => false);
+			if (!running) return this.showConsent(consent);
+		}
 		if (!this.core.hub.getPane(this.opts.tileId)) await this.waitForLayout();
 		if (this.disposed) return;
 		if (this.el.clientWidth > 10) this.fit.fit();
@@ -494,6 +502,22 @@ export class TerminalSurface {
 		}
 	}
 
+	/** "Start this?" for a tile this device never ran: shows exactly what would run, and where. */
+	private showConsent(c: NonNullable<SurfaceOptions["consent"]>) {
+		this.hideOverlay();
+		const o = (this.overlayEl = this.el.createDiv({ cls: "vivarium-term-overlay vivarium-consent" }));
+		o.createDiv({ text: "Not started on this device yet. It would run:" });
+		o.createEl("code", { text: c.command });
+		o.createDiv({ cls: "vivarium-consent-cwd", text: `in ${c.cwd}` });
+		const b = o.createEl("button", { text: "Start", cls: "mod-cta" });
+		b.addEventListener("click", (e) => {
+			e.stopPropagation();
+			c.grant();
+			this.hideOverlay();
+			this.start();
+		});
+	}
+
 	private hideOverlay() {
 		this.overlayEl?.remove();
 		this.overlayEl = null;
@@ -510,6 +534,7 @@ export class TerminalSurface {
 		await this.core.hub.killWindow(this.opts.tileId);
 		this.opts.startLaunch = launch;
 		this.opts.startCwd = cwd;
+		this.opts.consent?.grant(); // you pressed Restart: that's a yes
 		await this.start();
 	}
 

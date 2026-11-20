@@ -191,6 +191,49 @@ export class VivariumCore {
 		return abs;
 	}
 
+	// ---- which tiles may start on this device ----
+	// A tile file is a command. Files can arrive by git pull or sync, so opening a canvas must not
+	// run a command this device never agreed to: a tile runs by itself only if it was created here,
+	// or you pressed Start once for exactly this command and folder (a changed command asks again).
+	// Kept per device, never in the vault.
+	private trusted: Record<string, string> | null = null;
+	/** Until the first-run migration finishes, everything already in the vault counts as yours. */
+	private trustMigrating = false;
+
+	private trustKey(spec: TileSpec): string {
+		return `${spec.command.trim()}\n${spec.cwd}`;
+	}
+
+	initTrust() {
+		this.trusted = (this.app.loadLocalStorage("vivarium-trusted") as Record<string, string> | null) ?? null;
+		if (this.trusted) return;
+		// First run with this feature: tiles that exist now were already running unasked; keep that.
+		this.trusted = {};
+		this.trustMigrating = true;
+		this.app.workspace.onLayoutReady(async () => {
+			for (const f of this.app.vault.getFiles().filter((x) => x.extension === TILE_EXT)) {
+				const spec = await this.readSpec(f);
+				if (spec) this.trust(spec);
+			}
+			this.trustMigrating = false;
+			this.app.saveLocalStorage("vivarium-trusted", this.trusted);
+		});
+	}
+
+	isTrusted(spec: TileSpec): boolean {
+		if (this.trustMigrating) {
+			this.trust(spec);
+			return true;
+		}
+		return this.trusted?.[spec.id] === this.trustKey(spec);
+	}
+
+	trust(spec: TileSpec) {
+		this.trusted ??= {};
+		this.trusted[spec.id] = this.trustKey(spec);
+		if (!this.trustMigrating) this.app.saveLocalStorage("vivarium-trusted", this.trusted);
+	}
+
 	// ---- per-device tile state (never in the vault: no git churn, nothing machine-specific synced) ----
 	private stateCache: Record<string, Record<string, unknown>> | null = null;
 	private stateTimer: number | null = null;
@@ -252,6 +295,7 @@ export class VivariumCore {
 		let p = normalizePath(`${folder}/${base}.${TILE_EXT}`);
 		for (let i = 2; this.app.vault.getAbstractFileByPath(p); i++) p = normalizePath(`${folder}/${base} ${i}.${TILE_EXT}`);
 		const spec: TileSpec = { version: 1, id, title: program.name, command: program.command, cwd: this.portableCwd(program.cwd) };
+		this.trust(spec); // made here: may run here
 		return this.app.vault.create(p, JSON.stringify(spec, null, 2) + "\n");
 	}
 

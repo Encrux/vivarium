@@ -165,7 +165,8 @@ export class SessionKeeper {
 		const wanted: TileSpec[] = [];
 		for (const f of files) {
 			const spec = await this.core.readSpec(f);
-			if (spec && this.core.tileState<RunState>(spec.id).running) wanted.push(spec);
+			// a command that changed through a sync since it last ran here waits for Start (core.trust)
+			if (spec && this.core.tileState<RunState>(spec.id).running && this.core.isTrusted(spec)) wanted.push(spec);
 		}
 		if (!wanted.length || !this.core.tmuxAvailable()) return;
 		await this.core.hub.ensureConnected();

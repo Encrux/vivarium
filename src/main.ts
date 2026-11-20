@@ -41,6 +41,7 @@ export default class VivariumPlugin extends Plugin {
 		const pluginDir = `${(this.app.vault.adapter as any).getBasePath()}/${this.manifest.dir}`;
 		this.core = new VivariumCore(this.app, this.settings, pluginDir);
 		this.setUpAgents(pluginDir);
+		this.core.initTrust();
 		this.zoom = new SemanticZoom(
 			(n) => [TILE_EXT, WINDOW_EXT, WEB_EXT].includes(n.file?.extension),
 			(f) => ([TILE_EXT, WINDOW_EXT, WEB_EXT].includes(f.extension) ? f.basename : null),

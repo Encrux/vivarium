@@ -29,6 +29,13 @@
 	background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
 	font-size: var(--font-ui-smaller); color: var(--text-muted);
 }
+.vivarium-consent {
+	inset: 50% auto auto 50%; transform: translate(-50%, -50%); max-width: calc(100% - 32px);
+	flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px 14px;
+	font-size: var(--font-ui-small);
+}
+.vivarium-consent code { color: var(--text-normal); white-space: pre-wrap; word-break: break-all; }
+.vivarium-consent-cwd { font-size: var(--font-ui-smaller); }
 .vivarium-term-error { padding: 16px; color: var(--text-error); font-size: var(--font-ui-small); }
 
 /* ---- pickers & toolbar ---- */

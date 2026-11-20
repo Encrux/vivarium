@@ -214,52 +214,35 @@ Measured with **30 terminals each printing ~20 coloured lines/s** (Obsidian 1.15
 | keystroke → echo | **p50 0.6 ms**, p95 11 ms |
 | semantic zoom on 160 cards: panning / zooming through all levels | **60 fps** / ~60 fps |
 
-## Status
+## Platforms
 
-**Works**: use it. **Experimental**: works, with rough edges or little real-world testing.
-Ideas and things that aren't planned are listed [below the tables](#not-yet).
+| Platform | Support |
+|---|---|
+| **macOS 14+** | Supported |
+| **Linux** (Wayland) | Supported. Tested on Ubuntu 26.04 |
+| Windows | Not supported: no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)) |
+| Obsidian mobile | Not supported: no local programs on iOS or Android |
 
-### Tiles
+Everything else in this README works on both. Where they differ:
 
-| Feature | macOS | Linux | Notes |
-|---|---|---|---|
-| Terminal tiles | **Works** | **Works** | Linux: tested on Ubuntu 26.04; tmux 3.8+ recommended ([Caveats](#caveats)) |
-| Web tiles | **Works** | Experimental | Linux: should work, little tested |
-| Semantic zoom | **Works** | **Works** | |
-| App tiles: apps started from the canvas | Experimental | Experimental | Linux: tested end to end in Docker, not yet much on a real desktop |
-| App tiles: GPU-rendered apps | **Works** | Experimental | Linux: GPU path only tested with software GL; without a GPU it renders on the CPU |
-| App tiles: windows that are already open | Experimental | No ([#4](https://github.com/Encrux/vivarium/issues/4)) | Linux: Firefox in a tile has its own clean profile, one Firefox tile at a time |
+| | macOS | Linux |
+|---|---|---|
+| App tiles | 🟡 real windows on an invisible display | 🟡 apps run in Vivarium's own hidden display; tested in Docker, little on real desktops |
+| GPU-rendered apps in app tiles | 🟢 | 🟡 only tested with software rendering |
+| Already-open windows in app tiles | 🟡 | 🔴 [#4](https://github.com/Encrux/vivarium/issues/4) (Firefox gets its own clean profile) |
+| Web tiles | 🟢 | 🟡 little tested |
+| Programs keep running *through* a logout | 🔴 they come back after login | 🟡 with `loginctl enable-linger` |
 
-### Things keep running
+🟢 works · 🟡 experimental · 🔴 not available
 
-| Feature | macOS | Linux | Notes |
-|---|---|---|---|
-| Programs survive quitting Obsidian | **Works** | **Works** | Linux app tiles: experimental |
-| Tiles come back after a reboot, crash or logout | **Works** | **Works** | agents resume their own conversation; Linux app tiles: experimental |
-| Programs keep running *through* a logout | No | Experimental | Linux: needs `loginctl enable-linger` once |
+## Roadmap
 
-### Agents and sharing
+Not scheduled. Each issue collects the open design questions; comments welcome.
 
-| Feature | macOS | Linux | Notes |
-|---|---|---|---|
-| `vivarium` CLI + agent skill | **Works** | **Works** | Codex, Claude Code and other harnesses; installed by the plugin |
-| Resume or fork a tile's own conversation | **Works** | **Works** | Claude Code, Codex |
-| Vault in git or synced, as a backup | **Works** | **Works** | synced tiles wait for **Start** ([Vaults in git](#vaults-in-git-or-synced)) |
-
-### Not yet
-
-Ideas, not scheduled. Each issue collects the design questions; comments welcome.
-
-- **Several people on one canvas, live**: [#1](https://github.com/Encrux/vivarium/issues/1).
-  Live tiles run on the host's machine, so this needs view-only and hand-over modes.
-- **Continue a tile on another machine** (agent conversations, processes): [#2](https://github.com/Encrux/vivarium/issues/2).
-  Today the canvas syncs, and agents start fresh there.
-- **Linux: already-open windows in app tiles** (e.g. your real Firefox with its profile): [#4](https://github.com/Encrux/vivarium/issues/4).
-
-Not planned for now:
-
-- **Windows**: no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)).
-- **Obsidian mobile**: no local programs on iOS or Android.
+- [ ] Linux: show already-open windows (e.g. your real Firefox) in app tiles ([#4](https://github.com/Encrux/vivarium/issues/4))
+- [ ] Several people on one canvas, live ([#1](https://github.com/Encrux/vivarium/issues/1))
+- [ ] Continue a tile on another machine: agent conversations, processes ([#2](https://github.com/Encrux/vivarium/issues/2))
+- [ ] Windows ([#3](https://github.com/Encrux/vivarium/issues/3))
 
 Something missing or broken? [Open an issue](https://github.com/Encrux/vivarium/issues).
 

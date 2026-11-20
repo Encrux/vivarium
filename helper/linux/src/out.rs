@@ -1,26 +1,63 @@
-//! helper → plugin: framed messages on stdout, the same framing as the macOS helper.
+//! helper → plugin: framed messages, the same framing as the macOS helper.
 //!
 //!   [u32 BE length][u8 type][payload]      length counts the type byte + payload
 //!     type 1  JSON (UTF-8): replies (carry the request's `id`) and events (carry `ev`)
 //!     type 3  frame ready (binary, see `frame_ready`)
 //!
+//! Where they go: stdout (spawned by the plugin, `--stdio`, the harness) or the one connected
+//! client of the daemon's unix socket (`--listen`). Without a client, messages are dropped: the
+//! plugin gets the current state again when it (re)connects.
+//!
 //! Everything is written from the event-loop thread, one write per message, flushed at once:
 //! frame-ready latency matters more than syscall count, and messages are small.
 use serde_json::{Map, Value};
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 pub const TYPE_JSON: u8 = 1;
 pub const TYPE_FRAME: u8 = 3;
+
+static SINK: Mutex<Option<Box<dyn Write + Send>>> = Mutex::new(None);
+/// stdio mode: losing the plugin means shutting down. Daemon mode: just drop the client.
+static DAEMON: AtomicBool = AtomicBool::new(false);
+static LOST: AtomicBool = AtomicBool::new(false);
+
+pub fn use_stdout() {
+    *SINK.lock().unwrap() = Some(Box::new(std::io::stdout()));
+}
+
+pub fn set_daemon() {
+    DAEMON.store(true, Ordering::Relaxed);
+}
+
+/// The daemon's current client (None: nobody connected).
+pub fn set_sink(w: Option<Box<dyn Write + Send>>) {
+    *SINK.lock().unwrap() = w;
+    LOST.store(false, Ordering::Relaxed);
+}
+
+/// A write to the client failed since the last call (daemon mode).
+pub fn take_lost() -> bool {
+    LOST.swap(false, Ordering::Relaxed)
+}
 
 fn frame(ty: u8, payload: &[u8]) {
     let mut msg = Vec::with_capacity(payload.len() + 5);
     msg.extend_from_slice(&(payload.len() as u32 + 1).to_be_bytes());
     msg.push(ty);
     msg.extend_from_slice(payload);
-    let mut out = std::io::stdout().lock();
+    let mut sink = SINK.lock().unwrap();
+    let Some(out) = sink.as_mut() else { return };
     if out.write_all(&msg).and_then(|_| out.flush()).is_err() {
-        // The plugin went away; nothing left to do (apps die with our socket, see README).
-        crate::shutdown();
+        if DAEMON.load(Ordering::Relaxed) {
+            *sink = None;
+            LOST.store(true, Ordering::Relaxed);
+        } else {
+            // The plugin went away; nothing left to do (apps die with our socket, see README).
+            drop(sink);
+            crate::shutdown();
+        }
     }
 }
 

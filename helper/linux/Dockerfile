@@ -7,9 +7,10 @@ FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        rustc cargo pkg-config libxkbcommon-dev xkb-data \
+        rustc cargo pkg-config libxkbcommon-dev xkb-data libgbm-dev \
+        libegl1 libegl-mesa0 libgles2 mesa-utils-bin \
         nodejs \
-        gtk-4-examples gtk-3-examples foot \
+        gtk-4-examples gtk-3-examples foot weston \
         fonts-dejavu-core adwaita-icon-theme ca-certificates procps time \
     && rm -rf /var/lib/apt/lists/*
 

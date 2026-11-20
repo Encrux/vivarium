@@ -47,7 +47,12 @@ use smithay::{
         tablet_manager::TabletSeatHandler,
     },
 };
+use crate::gpu::Pixels;
+use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::delegate_dmabuf;
+use smithay::wayland::dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// Damage bookkeeping for one consumer of a window's content: one per shm slot (what that slot
@@ -120,6 +125,8 @@ pub struct Win {
     pub id: u32,
     pub window: Window,
     pub pid: i32,
+    /// VIVARIUM_TILE of the app's process (or an ancestor's): which tile launched it
+    pub tag: Option<String>,
     pub mapped: bool,
     pub visible: bool,
     fb: Option<FrameFile>,
@@ -177,7 +184,7 @@ impl Win {
         let (title, app_id) = title_app(self.window.toplevel().unwrap());
         let g = self.window.geometry();
         json!({"windowId": self.id, "pid": self.pid, "app": app_id, "appId": app_id, "bundleId": app_id,
-               "title": title, "width": g.size.w, "height": g.size.h, "onScreen": self.visible})
+               "title": title, "width": g.size.w, "height": g.size.h, "onScreen": self.visible, "tag": self.tag})
     }
 
     /// Everything to draw, bottom to top, in frame coordinates (origin = xdg window geometry, so
@@ -212,6 +219,33 @@ impl Win {
         }
         out
     }
+}
+
+/// The tile an app belongs to: `VIVARIUM_TILE` in the environment of the window's process, or of
+/// the nearest ancestor that has it (launchers, `sh -c`, snap/flatpak wrappers re-exec). Our own
+/// process ends the walk.
+fn tile_tag(pid: i32) -> Option<String> {
+    let me = std::process::id() as i32;
+    let mut p = pid;
+    for _ in 0..12 {
+        if p <= 1 || p == me {
+            return None;
+        }
+        if let Ok(env) = std::fs::read(format!("/proc/{p}/environ")) {
+            for kv in env.split(|b| *b == 0) {
+                if let Some(v) = kv.strip_prefix(b"VIVARIUM_TILE=") {
+                    let v = String::from_utf8_lossy(v).into_owned();
+                    if !v.is_empty() {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        let stat = std::fs::read_to_string(format!("/proc/{p}/stat")).ok()?;
+        // pid (comm) state ppid ...: comm may contain spaces/parens, so split after the last ')'
+        p = stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()?;
+    }
+    None
 }
 
 fn title_app(t: &ToplevelSurface) -> (String, String) {
@@ -249,6 +283,17 @@ pub struct State {
     layout_changed: bool,
     pointer_win: Option<u32>,
     last_cursor: String,
+    /// random per run: window ids are only meaningful together with it (they restart at 1)
+    pub instance: String,
+    /// someone receives frames (stdio mode: always; daemon: while a client is connected)
+    pub has_client: bool,
+    /// apps we launched that haven't exited
+    pub children: usize,
+    pub idle_since: Option<Instant>,
+    pub gpu: Option<crate::gpu::Gpu>,
+    dmabuf: Option<(DmabufState, DmabufGlobal)>,
+    /// CPU copies of GPU-rendered surface buffers (and their last read commit)
+    shadows: HashMap<ObjectId, (WlSurface, Rc<Pixels>, Option<CommitCounter>)>,
 }
 
 pub struct ClientState {
@@ -261,6 +306,9 @@ impl ClientData for ClientState {
 
 pub struct Options {
     pub fps: u32,
+    /// use a GPU render node for clients (linux-dmabuf) when there is one
+    pub gpu: bool,
+    pub render_node: Option<String>,
     pub xkb_layout: String,
     pub xkb_variant: String,
     pub xkb_options: Option<String>,
@@ -302,6 +350,22 @@ impl State {
         output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((0, 0).into()));
         output.set_preferred(mode);
 
+        // GPU for clients: a render node → advertise linux-dmabuf on it (see gpu.rs).
+        let software = std::env::var("VIVARIUM_GPU").is_ok_and(|v| v == "software");
+        let gpu = if opts.gpu || software { crate::gpu::Gpu::init(opts.render_node.as_deref(), software) } else { None };
+        let dmabuf = gpu.as_ref().and_then(|g| {
+            let dev = g.main_device?;
+            let formats = smithay::backend::renderer::ImportDma::dmabuf_formats(&g.renderer);
+            let feedback = DmabufFeedbackBuilder::new(dev, formats).build().map_err(|e| out::log(format!("gpu: dmabuf feedback: {e}"))).ok()?;
+            let mut st = DmabufState::new();
+            let global = st.create_global_with_default_feedback::<Self>(&dh, &feedback);
+            Some((st, global))
+        });
+        match &gpu {
+            Some(g) => out::log(format!("gpu: {} (dmabuf for clients: {})", g.description, dmabuf.is_some())),
+            None => out::log("gpu: none, clients render into shared memory"),
+        }
+
         Self {
             start: Instant::now(),
             dh,
@@ -327,7 +391,111 @@ impl State {
             layout_changed: false,
             pointer_win: None,
             last_cursor: String::new(),
+            instance: {
+                let mut b = [0u8; 8];
+                let _ = std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b));
+                format!("{:016x}", u64::from_le_bytes(b) ^ std::process::id() as u64)
+            },
+            has_client: true,
+            children: 0,
+            idle_since: None,
+            gpu,
+            dmabuf,
+            shadows: HashMap::new(),
         }
+    }
+
+    pub fn gpu_info(&self) -> Value {
+        match &self.gpu {
+            None => json!({"enabled": false}),
+            Some(g) => json!({"enabled": true, "device": g.description, "dmabuf": self.dmabuf.is_some(),
+                              "imports": g.imports, "readbackPx": g.readback_px, "readbackUs": g.readback_us,
+                              "failures": g.failures}),
+        }
+    }
+
+    // ---- daemon clients ----
+
+    /// A plugin connected: it knows nothing yet. Pause everything until it says what it shows
+    /// (set_visible), and make the next frame of every window a full one.
+    pub fn client_connected(&mut self) {
+        self.has_client = true;
+        for w in &mut self.wins {
+            w.visible = false;
+            w.outstanding = false;
+            w.trackers[2] = Tracker::default();
+            w.front_valid = false;
+        }
+    }
+
+    /// Tell the new client about the windows that already exist (and their frame files).
+    pub fn announce_windows(&mut self) {
+        let mut evs = vec![];
+        for w in &self.wins {
+            if !w.mapped {
+                continue;
+            }
+            let mut info = w.info();
+            if let Some(p) = w.window.toplevel().unwrap().parent() {
+                info["parentId"] = json!(self.wins.iter().find(|x| x.surface() == &p).map(|x| x.id));
+            }
+            evs.push(("window_added", info));
+            if let Some(f) = &w.fb {
+                evs.push(("frame_buffer", json!({"windowId": w.id, "path": f.path.to_string_lossy(), "bytes": frame::HEADER + 2 * f.capacity})));
+            }
+        }
+        for (name, ev) in evs {
+            out::event(name, ev);
+        }
+    }
+
+    /// Nobody watches: no frames, no frame callbacks (apps stop drawing), windows stay alive.
+    pub fn client_gone(&mut self) {
+        self.has_client = false;
+        for w in &mut self.wins {
+            w.visible = false;
+            w.outstanding = false;
+        }
+    }
+
+    // ---- GPU-rendered surfaces ----
+
+    /// After a commit: read back what changed in the GPU-rendered buffers of this surface tree.
+    fn update_shadows(&mut self, root: &WlSurface) {
+        let Some(gpu) = self.gpu.as_mut() else { return };
+        let shadows = &mut self.shadows;
+        with_surface_tree_upward(
+            root,
+            (),
+            |_, _, _| TraversalAction::DoChildren(()),
+            |surface, states, _| {
+                let Some(d) = states.data_map.get::<smithay::backend::renderer::utils::RendererSurfaceStateUserData>() else { return };
+                let d = d.lock().unwrap();
+                let Some(b) = d.buffer() else { return };
+                let buffer: &wl_buffer::WlBuffer = b;
+                let dmabuf = smithay::wayland::dmabuf::get_dmabuf(buffer).ok();
+                if dmabuf.is_none() && !gpu.gl_for_shm {
+                    shadows.remove(&surface.id());
+                    return; // shm: the CPU compositor reads it in place
+                }
+                let commit = d.current_commit();
+                let entry = shadows.entry(surface.id()).or_insert_with(|| (surface.clone(), Rc::new(Pixels::default()), None));
+                if entry.2 == Some(commit) {
+                    return;
+                }
+                let Some(size) = smithay::backend::renderer::buffer_dimensions(buffer) else { return };
+                let damage: Vec<Rectangle<i32, smithay::utils::Buffer>> = match entry.2 {
+                    Some(c) => d.damage_since(Some(c)).iter().copied().collect(),
+                    None => vec![],
+                };
+                if gpu.update_shadow(buffer, dmabuf.map(|v| &*v), Some(states), size, &damage, &mut entry.1) {
+                    entry.2 = Some(commit);
+                } else {
+                    shadows.remove(&surface.id());
+                }
+            },
+            |_, _, _| true,
+        );
     }
 
     fn now_ms(&self) -> u32 {
@@ -414,7 +582,17 @@ impl State {
         }
         let back = 1 - w.front;
         let redraw = w.trackers[back].damage(size, &surfs);
-        let layers: Vec<Layer> = surfs.into_iter().filter_map(|s| Some(Layer { buffer: s.buffer?, dst: s.dst })).collect();
+        let shadows = &self.shadows;
+        let layers: Vec<Layer> = surfs
+            .into_iter()
+            .filter_map(|s| {
+                let src = match shadows.get(&s.surface.id()) {
+                    Some((_, px, Some(_))) => frame::Src::Pixels(px.clone()),
+                    _ => frame::Src::Shm(s.buffer?),
+                };
+                Some(Layer { src, dst: s.dst })
+            })
+            .collect();
         let fb = w.fb.as_mut().unwrap();
         let t0 = Instant::now();
         {
@@ -485,6 +663,11 @@ impl State {
             w.front_valid = false; // don't diff the full frame away
             w.dirty = true;
             w.outstanding = false;
+            // ...and the tile showing it now may be new (plugin reconnected, tile reopened): tell
+            // it where the frames are before the first one arrives.
+            if let Some(f) = &w.fb {
+                out::event("frame_buffer", json!({"windowId": w.id, "path": f.path.to_string_lossy(), "bytes": frame::HEADER + 2 * f.capacity}));
+            }
         }
         w.visible = visible;
         self.arm_tick();
@@ -571,6 +754,18 @@ impl State {
         ptr.motion(self, under, &MotionEvent { location: pos, serial: SERIAL_COUNTER.next_serial(), time });
         ptr.frame(self);
         Ok(())
+    }
+
+    /// The mouse left the tile: no surface is hovered any more (hover effects, tooltips end).
+    pub fn pointer_leave(&mut self) {
+        let ptr = self.seat.get_pointer().unwrap();
+        if ptr.is_grabbed() {
+            return; // a drag or menu holds the pointer; its own release ends it
+        }
+        let time = self.now_ms();
+        ptr.motion(self, None, &MotionEvent { location: (-1.0, -1.0).into(), serial: SERIAL_COUNTER.next_serial(), time });
+        ptr.frame(self);
+        self.pointer_win = None;
     }
 
     pub fn pointer_button(&mut self, id: u32, x: f64, y: f64, button: u32, down: bool) -> Result<(), String> {
@@ -664,6 +859,13 @@ impl CompositorHandler for State {
         if is_sync_subsurface(surface) {
             return; // applied (and seen again here) when its parent commits
         }
+        if self.gpu.is_some() {
+            let mut sroot = surface.clone();
+            while let Some(p) = get_parent(&sroot) {
+                sroot = p;
+            }
+            self.update_shadows(&sroot);
+        }
         let Some(root) = self.toplevel_of(surface) else { return };
         let output = self.output.clone();
         let Some(w) = self.win_for_root(&root) else { return };
@@ -699,6 +901,21 @@ impl CompositorHandler for State {
 impl BufferHandler for State {
     fn buffer_destroyed(&mut self, _: &wl_buffer::WlBuffer) {}
 }
+
+/// Clients' GPU buffers: accept those the GPU can import (it can read them back later).
+impl DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf.as_mut().expect("dmabuf global without state").0
+    }
+    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
+        let ok = self.gpu.as_mut().is_some_and(|g| smithay::backend::renderer::ImportDma::import_dmabuf(&mut g.renderer, &dmabuf, None).is_ok());
+        if ok {
+            let _ = notifier.successful::<State>();
+        } else {
+            notifier.failed();
+        }
+    }
+}
 impl ShmHandler for State {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
@@ -725,12 +942,15 @@ impl XdgShellHandler for State {
         });
         let id = self.next_id;
         self.next_id += 1;
+        let tag = tile_tag(pid);
         self.wins.push(Win {
             id,
             window: Window::new_wayland_window(surface),
             pid,
+            tag,
             mapped: false,
-            visible: true,
+            // daemon without a client: nobody to show it to yet
+            visible: self.has_client,
             fb: None,
             fb_gen: 0,
             front: 1,
@@ -746,6 +966,7 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        self.shadows.retain(|_, (s, _, _)| s.is_alive());
         if let Some(i) = self.wins.iter().position(|w| w.surface() == surface.wl_surface()) {
             let w = self.wins.remove(i);
             if w.mapped {
@@ -781,6 +1002,7 @@ impl XdgShellHandler for State {
 
     fn popup_destroyed(&mut self, _surface: PopupSurface) {
         self.layout_changed = true;
+        self.shadows.retain(|_, (s, _, _)| s.is_alive());
     }
 
     /// Menus: grab pointer + keyboard for the popup chain, as a desktop compositor would, so a
@@ -875,3 +1097,4 @@ delegate_seat!(State);
 delegate_data_device!(State);
 delegate_output!(State);
 delegate_cursor_shape!(State);
+delegate_dmabuf!(State);

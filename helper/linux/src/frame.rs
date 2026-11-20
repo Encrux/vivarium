@@ -111,9 +111,17 @@ impl Drop for FrameFile {
     }
 }
 
+/// Where a layer's pixels come from.
+pub enum Src {
+    /// the client's shm buffer, read in place
+    Shm(WlBuffer),
+    /// a GPU-rendered buffer's CPU copy (see gpu.rs)
+    Pixels(std::rc::Rc<crate::gpu::Pixels>),
+}
+
 /// One surface to draw, in frame coordinates, bottom to top.
 pub struct Layer {
-    pub buffer: WlBuffer,
+    pub src: Src,
     /// destination rectangle (logical == pixels in M0: output scale 1)
     pub dst: Rectangle<i32, Logical>,
 }
@@ -137,13 +145,41 @@ pub fn composite(dst: &mut [u8], stride: usize, rect: Rectangle<i32, Logical>, l
 }
 
 fn draw(dst: &mut [u8], stride: usize, r: Rectangle<i32, Logical>, l: &Layer, first: bool) {
-    let _ = with_buffer_contents(&l.buffer, |ptr, len, d| {
-        let src = unsafe { std::slice::from_raw_parts(ptr, len) };
-        let (bw, bh, bstride, boff) = (d.width as usize, d.height as usize, d.stride as usize, d.offset as usize);
-        if boff + bstride * bh.saturating_sub(1) + bw * 4 > len {
-            return; // client lied about its pool size
+    match &l.src {
+        Src::Shm(buffer) => {
+            let _ = with_buffer_contents(buffer, |ptr, len, d| {
+                let src = unsafe { std::slice::from_raw_parts(ptr, len) };
+                let (bw, bh, bstride, boff) = (d.width as usize, d.height as usize, d.stride as usize, d.offset as usize);
+                if boff + bstride * bh.saturating_sub(1) + bw * 4 > len {
+                    return; // client lied about its pool size
+                }
+                let opaque = d.format == wl_shm::Format::Xrgb8888;
+                draw_from(dst, stride, r, l, first, &src[boff..], bw, bh, bstride, opaque);
+            });
         }
-        let opaque = d.format == wl_shm::Format::Xrgb8888;
+        Src::Pixels(p) => {
+            if p.data.len() >= p.stride() * p.height && p.width > 0 {
+                draw_from(dst, stride, r, l, first, &p.data, p.width, p.height, p.stride(), p.opaque);
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_from(
+    dst: &mut [u8],
+    stride: usize,
+    r: Rectangle<i32, Logical>,
+    l: &Layer,
+    first: bool,
+    src: &[u8],
+    bw: usize,
+    bh: usize,
+    bstride: usize,
+    opaque: bool,
+) {
+    let boff = 0;
+    {
         let (dw, dh) = (l.dst.size.w as usize, l.dst.size.h as usize);
         let scaled = dw != bw || dh != bh;
         let x0 = (r.loc.x - l.dst.loc.x) as usize; // first column inside the layer
@@ -179,7 +215,7 @@ fn draw(dst: &mut [u8], stride: usize, r: Rectangle<i32, Logical>, l: &Layer, fi
                 }
             }
         }
-    });
+    }
 }
 
 /// XRGB: the X byte is undefined, force alpha to 255.

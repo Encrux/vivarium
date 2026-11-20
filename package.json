@@ -14,7 +14,8 @@
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.24.2",
     "obsidian": "^1.14.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "ws": "^8.23.0"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

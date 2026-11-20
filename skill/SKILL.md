@@ -6,8 +6,11 @@ description: Use when $VIVARIUM_TILE is set (you run in a tile on the user's Obs
 # Vivarium
 
 You run in a tile on an Obsidian canvas: `$VIVARIUM_TILE` is your tile's id. Use the `vivarium`
-command directly (if it's not found: `~/.vivarium/bin/vivarium`). You don't need `help` or `ls`
-first. Without an id, a command acts on your own tile.
+command directly: no need to look around first (`help`, `ls`, `me`) unless the task needs it.
+Without an id, a command acts on your own tile.
+
+Run each `vivarium` command on its own, not chained with `&&`, `;` or `||`: a plain
+`vivarium …` command can be pre-approved, a chain needs the user's approval every time.
 
 | Goal | Command |
 |---|---|
@@ -27,5 +30,6 @@ Notes:
   (coding agents: when they stop showing "esc to interrupt"). Pass `--timeout S` for long jobs.
 - To start another coding agent with a task: `vivarium add -- codex "<task>"` or
   `vivarium add -- claude "<task>"`.
+- If the shell can't find `vivarium`, it's at `~/.vivarium/bin/vivarium`.
 - If a command fails with "blocked by a sandbox", re-run it with the permission to run outside
   the sandbox. It needs Obsidian's local socket and tmux.

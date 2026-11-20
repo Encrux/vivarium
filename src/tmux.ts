@@ -413,7 +413,7 @@ export class TmuxHub {
 		// starts at its final size; then we pin it (window-size manual for that window only).
 		await this.cmd(`set-option -g default-size ${cols}x${rows}`).catch(() => {});
 		const lines = await this.cmd(
-			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
+			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} -e VIVARIUM_TMUX_SOCKET=${tq(this.socket)}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
 		);
 		const [windowId, paneId] = (lines[0] ?? "").split(" ");
 		// Pin this window's size, so a terminal attaching to it (`vivarium attach`) doesn't resize it.

@@ -2,283 +2,121 @@
 
 # Vivarium
 
-**Live programs on your Obsidian Canvas.**<br>
-Terminals, coding agents, dev servers and web pages as tiles next to your notes. They keep running
-while you pan away, close the canvas or quit Obsidian.
+Live programs on your Obsidian Canvas.
 
 <img src="docs/media/hero.gif" alt="Right-click on a canvas, add npm run dev as a terminal tile, rename it Dev server, then drag in a web tile showing the running app" width="900">
 
 </div>
 
----
+Vivarium puts terminals, coding agents, dev servers and web pages on a canvas, next to your notes.
+They keep running when you close the canvas or quit Obsidian.
 
-## What it is
+> [!NOTE]
+> This project was built for personal use. The highest priority was a working prototype, quickly,
+> so AI was used extensively. Expect rough edges.
 
-Obsidian Canvas is a great place to *think*. Vivarium makes it a place to *work*: put the programs
-you're working with next to the notes about them, on one infinite plane.
+## Features
 
-| Tile | What it is | Feels |
-|---|---|---|
-| **Terminal** | Any command (`zsh`, `claude`, `codex`, `npm run dev`, `htop`) in a real terminal, backed by tmux | Native: keystroke → echo in **0.6 ms** (p50) |
-| **Web** | A real browser page inside the card (`localhost:3000`, docs, dashboards) | Native: direct input, scales with the canvas, Obsidian keeps focus |
-| **App window** *(experimental)* | Any app's window as a live preview; click it to work in the real window | Live preview at 60 fps; native once clicked |
-
-Plus **semantic zoom**: zoom out and your workspace stays readable. Card headlines and group titles
-are kept at screen size, like labels on a map, while live tiles freeze on their last picture.
-
-## Highlights
-
-### Agents can arrange the canvas
-
-Every tile knows who it is (`$VIVARIUM_TILE`), so a coding agent running in one can open programs
-next to itself, fork its own conversation into a new tile, leave notes, and read or type into
-other tiles. Below, Claude Code (Haiku) gets one prompt: *"Start the dev server in a tile next to
-you. Then fork yourself into a new tile and have the fork add a /health endpoint."* It opens the
-server beside itself, then forks its own conversation into a new tile, which goes on to write the
-endpoint. This is a real run, fast-forwarded while the agents work.
+- Terminal tiles run any command (`zsh`, `claude`, `codex`, `npm run dev`, `htop`) in a real terminal.
+- Web tiles show a page, like the app your dev server is serving.
+- App tiles show another program's window (experimental).
+- After a reboot or crash, tiles start again where they were. Claude Code and Codex tiles resume
+  their own conversation.
+- Coding agents in a tile can open tiles next to themselves, fork their conversation into a new
+  tile, and read or type into other tiles:
 
 <img src="docs/media/agents.gif" alt="Claude Code in a terminal tile opens a dev server tile next to itself and forks its conversation into a second Claude Code tile, connected by a fork arrow" width="900">
 
-```sh
-vivarium add -- npm run dev            # new tile beside me, connected with an arrow
-vivarium fork "try it with SQLite"     # continue this conversation in a new tile beside me
-vivarium note "Plan: 1) … 2) …"        # text card beside me
-vivarium send t3k9x2a "npm test" --wait  # type a command, wait until it's done, print the screen
-vivarium read t3k9x2a --lines 50       # what does that program show?
-```
-
-Agents need no setup. Every tile has `vivarium` on its PATH (`~/.vivarium/bin`, also linked into
-`~/.local/bin`). The plugin installs a `vivarium` [skill](https://agentskills.io) for Codex and
-other harnesses that read `~/.agents/skills`, and for Claude Code in `~/.claude/skills`. Agents
-pick it up when they're in a tile, and until then it costs them one line of context. You can turn
-this off in the settings.
-
-Codex's sandbox blocks the CLI (it needs Obsidian's socket and tmux), so Codex asks before each
-use. **Settings → Coding agents → Codex: no sandbox prompts for safe commands** lets
-`ls me read wait note fork move focus` run without asking. Commands that start or drive programs
-(`add send keys rm`) still ask.
-
-### Big workspaces stay readable
-
-Canvas unmounts card content below ~30% zoom to stay fast, and text cards go blank. Vivarium
-replaces them with each card's first heading at a readable size, then hands over to group titles
-when cards become specks:
+- Zoomed out, card titles stay readable:
 
 <img src="docs/media/zoom.gif" alt="Zooming out of a workspace from live terminals and a web preview: card headlines stay readable, then group titles; then into another group and back" width="900">
 
-### Things keep running
-
-- **Terminals live in tmux.** Quit Obsidian, reopen it: every program is still running, with its
-  scrollback, its screen (including full-screen apps like `vim` and `htop`) and its cursor.
-- **Even a reboot or crash is survivable.** Vivarium remembers what each tile was running. When
-  Obsidian starts again, those tiles come back by themselves, without you opening their canvas:
-  - **Claude Code** resumes *that tile's own conversation* (`claude --resume <session>`), not just the
-    latest one, so five agents come back as five agents.
-  - **Codex** does the same with `codex resume <session>`.
-  - **Other programs** show their previous output, a `── restored after restart ──` divider, and
-    start again in the same folder.
-  - **Shells** show their previous output and open in the folder you'd `cd`'d to.
-
-  Tiles you stopped on purpose stay stopped. Snapshots of recent output are kept per device in
-  `~/.vivarium/snapshots/` (mode 0600), never in the vault.
-- **Logging out (Linux)** ends your programs like a reboot does, and they come back the same way.
-  Logout kills processes in no particular order (an agent may die a moment before its shell), so
-  anything that ended in the last 45 seconds before the end counts as ended by the logout. To
-  keep programs *running* through a logout instead: Vivarium starts tmux in its own systemd scope
-  (setting "Keep programs running when you log out"), and you run `loginctl enable-linger` once.
-- **Even tmux crashing is survivable.** If the tmux server dies, Vivarium reconnects and brings
-  back what was running the same way.
-- **Attach from anywhere:** `tmux -L vivarium attach -t vivarium:<id>`, or `vivarium attach`.
-- **Web tiles remember their page** and keep their logins (own browser profile).
-
 ## Install
 
-Vivarium isn't in the community plugin directory (yet). Build it from source:
-
-**Requirements:** Obsidian 1.5+ (desktop), Node 20+, `tmux` (`brew install tmux` / `sudo apt install tmux`).
-App tiles on macOS additionally need macOS 14+ and the Xcode Command Line Tools; on Linux a Wayland
-session plus `sudo apt install cargo pkg-config libxkbcommon-dev libgbm-dev` (`update.sh` then builds
-the helper).
+You need Obsidian 1.5+ (desktop), Node 20+ and tmux (`brew install tmux` or `sudo apt install tmux`).
+Vivarium isn't in the community plugin directory yet, so you build it from source:
 
 ```sh
-git clone git@github.com:Encrux/vivarium.git && cd vivarium
-npm run build:helper                       # macOS only, optional: the helper for app tiles
-sh scripts/update.sh ~/path/to/your/vault  # builds and installs into the vault
+git clone https://github.com/Encrux/vivarium.git && cd vivarium
+sh scripts/update.sh ~/path/to/your/vault
 ```
 
-Then enable **Vivarium** under Settings → Community plugins. To update later, run
-`sh scripts/update.sh` again (it remembers the vault) and turn the plugin off and on.
+Then turn on Vivarium in Settings → Community plugins. To update, run `sh scripts/update.sh` again
+and turn the plugin off and on.
 
-The `vivarium` CLI and the agent skill install themselves when the plugin loads.
+App tiles need a small helper program:
 
-## Using it
+- macOS 14+: run `npm run build:helper` before `update.sh` (needs the Xcode Command Line Tools),
+  and allow Obsidian under Screen Recording and Accessibility in System Settings.
+- Linux (Wayland): `sudo apt install cargo pkg-config libxkbcommon-dev libgbm-dev`, then `update.sh`
+  builds it.
 
-**Add a tile.** All of these open the same picker. Type a command, a URL or an app name:
+## Usage
 
-| Where | How |
-|---|---|
-| Right-click on empty canvas | **Add program…**, next to Canvas's own *Add card / note / media* |
-| Canvas toolbar | the `>_` button: click it to open the picker, drag it to drop a tile where you release |
-| Command palette | **Vivarium: Add program to canvas…** |
-| Hotkeys | each preset (Shell, Claude Code, Codex, htop, …) has its own command you can bind |
+Right-click an empty spot on a canvas and choose **Add program…**, or use the `>_` button in the
+canvas toolbar. Type a command, a URL or an app name.
 
-**Work in it.** Click a tile to select it, then click or type inside it. Unselected tiles never take
-your scroll wheel, so panning a crowded canvas stays smooth. While a terminal has focus, every key
-goes to the program (arrows, Ctrl+C, Ctrl+R, …) except Obsidian's own shortcuts: Cmd+… on macOS,
-Ctrl+Shift+… on Linux, where Ctrl+Shift+C / V copy and paste, as in other Linux terminals.
-Clicking a link in a terminal opens it in your default browser.
+- Click a tile to select it, click again to type into it.
+- Double-click a tile's name to rename it.
+- Each tile is a small file in `Vivarium/`. Delete the file to stop the program.
+- In a terminal every key goes to the program, except Obsidian's shortcuts (Cmd on macOS,
+  Ctrl+Shift on Linux).
 
-**Name it.** Double-click a tile's name (or right-click → *Rename tile…*). Each tile is a small file
-in `Vivarium/` (`.term`, `.web`, `.window`). Open it in a tab, embed it in a note with
-`![[htop.term]]`, or delete it to stop the program.
+### Agents
 
-**Coding agents.** The *Codex* preset runs `codex --no-alt-screen`, so the tile scrolls through the
-conversation like a normal terminal. (Codex's full-screen mode keeps its history to itself; there,
-the wheel recalls old prompts.)
+Agents running in a tile get a `vivarium` command and a skill that explains it. There's nothing to
+set up.
 
-**App tiles (macOS).** Pick an app (Safari, Simulator, Figma, …) in the picker. The real window
-lives on an invisible virtual display and is streamed into the tile. Click the tile and the real
-window comes forward over it, so you use the actual app. Click the canvas to send it back. This
-needs **Screen Recording** and **Accessibility** for Obsidian (System Settings → Privacy & Security).
-Prefer **web tiles** for anything that runs in a browser: they're instant and never switch focus.
-
-**App tiles (Linux, experimental).** Pick an app in the picker. It runs inside Vivarium's own hidden
-Wayland display, so the app lives *in* the tile: click and type into it directly, no window comes
-forward. Apps keep running when you quit Obsidian, and are started again after a logout or reboot.
-Firefox runs with its own clean profile, separate from your normal one. Details:
-[helper/linux/README.md](helper/linux/README.md).
-
-## Vaults in git (or synced)
-
-Committing tiles is safe, and it's a good way to back up your canvases. A tile file is a recipe
-(command, title, folder), not the running program:
-
-| File | Holds |
-|---|---|
-| `.term` | `command`, `title`, `cwd` (vault-relative, `~/…`, or absolute) |
-| `.web` | the page the tile is *for* |
-| `.window` | which app (bundle id) |
-
-**Nothing runs just because a file arrived.** A terminal tile starts by itself only on a device
-where it was created, or where you pressed its **Start** button once. That button shows exactly
-what would run and where. If a pull or sync changes a tile's command, it asks again. So a
-`git pull`, a shared folder or a compromised sync can't run commands on your machine by putting
-tiles in your vault.
-
-Running state never goes into the vault, so committing doesn't produce noise. That includes
-scrollback, snapshots, agent sessions, logins and which window a tile shows. All of it stays per
-device: in `~/.vivarium/` and Obsidian's local storage. A tile file only changes when you change
-the tile. Typing a new address into a web tile *is* such a change, so that one is saved.
-
-Vivarium is built for one machine. On another machine the canvas looks the same, but a coding
-agent starts a fresh conversation there. To keep tiles out of git entirely, add to `.gitignore`:
-
-```gitignore
-Vivarium/          # tile files (the canvases then show missing-file cards elsewhere)
+```sh
+vivarium add -- npm run dev          # start a program in a new tile next to mine
+vivarium fork "try it with SQLite"   # continue this conversation in a new tile
+vivarium send <tile> "npm test" --wait
+vivarium read <tile>
 ```
 
-> **Don't put secrets in tiles.** Commands are stored verbatim in `.term` files, and web tiles
-> store their URL (watch out for `?token=…` links, e.g. Jupyter). Use your shell's environment
-> (`.zshrc`, a secrets manager) instead.
+Codex asks before each use because of its sandbox. Settings → Coding agents can allow the commands
+that only read or arrange the canvas.
 
-## How it works
+### Git and sync
 
-```
-Canvas file card ─► Embed ─┬─► Terminal tile  xterm.js (DOM renderer) ◄─────────┐
-                           │                       │ keys (send-keys)              │ raw bytes
-                           │                       ▼                               │
-                           │      ONE tmux control-mode client (tmux -C) ─────────┘
-                           │                       │
-                           │      tmux server (-L vivarium), one window per tile
-                           │
-                           ├─► Web tile       <webview> (Chromium, in-process with Obsidian)
-                           │
-                           └─► App tile       WebCodecs H.264 decoder ◄── native helper (Swift)
-                                                   ScreenCaptureKit → VideoToolbox (hardware)
-                                                   windows parked on a CGVirtualDisplay "stage"
-```
-
-**Performance is a feature.** Every tile only costs something while you can see it:
-
-| State | Terminal | App window | Web |
-|---|---|---|---|
-| visible | output written to xterm | stream at 60 fps (selected) / 8 fps | live |
-| off-screen / zoomed far out | raw bytes buffered, nothing parsed or painted; a noisy hidden tile gets tmux output switched off entirely | stream stopped, last frame kept | not painted, keeps running |
-| back on screen | flush the buffer, or repaint from a tmux snapshot | resume | instant |
-
-Measured with **30 terminals each printing ~20 coloured lines/s** (Obsidian 1.15, MacBook Air):
-
-| | |
-|---|---|
-| close-up / panning across the grid / zoomed to fit | **60 fps**, p95 ≈ 17 ms, no long tasks |
-| keystroke → echo | **p50 0.6 ms**, p95 11 ms |
-| semantic zoom on 160 cards: panning / zooming through all levels | **60 fps** / ~60 fps |
+Committing your vault with its tiles is fine, for example as a backup. A tile file holds the
+command, not the running program, and a tile that arrives through a pull or sync doesn't start
+until you press its Start button. Don't put secrets into commands or URLs, since those are saved in
+the tile files.
 
 ## Platforms
 
 | Platform | Support |
 |---|---|
-| **macOS 14+** | Supported |
-| **Linux** (Wayland) | Supported. Tested on Ubuntu 26.04 |
-| Windows | Not supported: no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)) |
-| Obsidian mobile | Not supported: no local programs on iOS or Android |
+| macOS 14+ | Supported |
+| Linux (Wayland) | Supported, tested on Ubuntu 26.04 |
+| Windows | Not supported, no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)) |
+| Obsidian mobile | Not supported |
 
-Everything else in this README works on both. Where they differ:
+Where macOS and Linux differ:
 
 | | macOS | Linux |
 |---|---|---|
-| App tiles | 🟡 real windows on an invisible display | 🟡 apps run in Vivarium's own hidden display; tested in Docker, little on real desktops |
-| GPU-rendered apps in app tiles | 🟢 | 🟡 only tested with software rendering |
-| Already-open windows in app tiles | 🟡 | 🔴 [#4](https://github.com/Encrux/vivarium/issues/4) (Firefox gets its own clean profile) |
-| Web tiles | 🟢 | 🟡 little tested |
-| Programs keep running *through* a logout | 🔴 they come back after login | 🟡 with `loginctl enable-linger` |
+| App tiles | 🟡 | 🟡 |
+| GPU-rendered apps in app tiles | 🟢 | 🟡 |
+| Windows that are already open, in app tiles | 🟡 | 🔴 [#4](https://github.com/Encrux/vivarium/issues/4) |
+| Web tiles | 🟢 | 🟡 |
+| Programs keep running through a logout | 🔴 | 🟡 |
 
 🟢 works · 🟡 experimental · 🔴 not available
 
 ## Roadmap
 
-Not scheduled. Each issue collects the open design questions; comments welcome.
+Ideas, not scheduled. Comments welcome on the issues.
 
-- [ ] Linux: show already-open windows (e.g. your real Firefox) in app tiles ([#4](https://github.com/Encrux/vivarium/issues/4))
-- [ ] Several people on one canvas, live ([#1](https://github.com/Encrux/vivarium/issues/1))
-- [ ] Continue a tile on another machine: agent conversations, processes ([#2](https://github.com/Encrux/vivarium/issues/2))
-- [ ] Windows ([#3](https://github.com/Encrux/vivarium/issues/3))
+- [ ] Show already-open windows in app tiles on Linux, e.g. your normal Firefox ([#4](https://github.com/Encrux/vivarium/issues/4))
+- [ ] Several people working on one canvas ([#1](https://github.com/Encrux/vivarium/issues/1))
+- [ ] Continue a tile on another machine ([#2](https://github.com/Encrux/vivarium/issues/2))
+- [ ] Windows support ([#3](https://github.com/Encrux/vivarium/issues/3))
 
-Something missing or broken? [Open an issue](https://github.com/Encrux/vivarium/issues).
+## More
 
-## Caveats
+- [How it works](docs/how-it-works.md): architecture, performance, crash recovery, git details, caveats
+- [Contributing](CONTRIBUTING.md): building, testing, the helpers
 
-- **Uses Obsidian internals** that plugins can't reach through the public API: `embedRegistry`,
-  `canvas.showCreationMenu`, `canvas:node-menu`, `importData`. An Obsidian update can break them.
-  Each touch point is small and isolated.
-- **Web tiles run Obsidian's bundled Chromium,** which only updates when you install a new Obsidian
-  release, not with in-app updates. Keep that in mind before browsing arbitrary sites in them.
-- **App tiles rely on a private macOS API** (`CGVirtualDisplay`, also used by DeskPad and
-  BetterDisplay). Using an app still switches focus to it, as macOS requires.
-- **Granting Accessibility to Obsidian** lets any Obsidian plugin post input to other apps.
-- **tmux before 3.8 crashes** when a pane is restarted with `respawn-pane` while a control client is
-  attached (tmux issue 5498). Vivarium never does that (Restart opens a new window), but other
-  tools attached to the same tmux server could.
-
-## Development
-
-```sh
-npm run dev            # rebuild on change into dev-vault/
-npm run build          # typecheck + build once
-npm run build:helper   # rebuild the Swift helper (macOS)
-npm run build:helper-linux   # rebuild the Rust helper (Linux; scripts/update.sh does it when cargo is installed)
-```
-
-Linux app tiles: `helper/linux/README.md` (daemon, GPU path, what survives logout/reboot), tested
-end to end with a real Linux Obsidian in Docker by `helper/linux/scripts/test-e2e.sh`.
-
-Open `dev-vault/` as a vault, or install into another one with `sh scripts/update.sh <vault>`.
-Toggle the plugin to reload it. `node scripts/record-demos/record.mjs` re-records the README videos
-in an isolated Obsidian instance (macOS). `sh scripts/tmux-crash.sh` prints a stack trace of the latest tmux
-crash (Ubuntu). The helper speaks a small JSON-lines / framed-binary protocol over stdin/stdout
-(`helper/macos/Sources/VivariumHelper/Protocol.swift`), so a Linux helper can slot in behind the
-same plugin code.
-
----
-
-<sub>Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>, built on Obsidian's own Canvas.</sub>
+<sub>Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>.</sub>

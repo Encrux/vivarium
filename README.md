@@ -21,7 +21,7 @@ you're working with next to the notes about them, on one infinite plane.
 |---|---|---|
 | **Terminal** | Any command (`zsh`, `claude`, `codex`, `npm run dev`, `htop`) in a real terminal, backed by tmux | Native: keystroke → echo in **0.6 ms** (p50) |
 | **Web** | A real browser page inside the card (`localhost:3000`, docs, dashboards) | Native: direct input, scales with the canvas, Obsidian keeps focus |
-| **App window** *(macOS, experimental; Linux in progress)* | Any app's window as a live preview; click it to work in the real window | Live preview at 60 fps; native once clicked |
+| **App window** *(experimental)* | Any app's window as a live preview; click it to work in the real window | Live preview at 60 fps; native once clicked |
 
 Plus **semantic zoom**: zoom out and your workspace stays readable. Card headlines and group titles
 are kept at screen size, like labels on a map, while live tiles freeze on their last picture.
@@ -96,7 +96,9 @@ when cards become specks:
 Vivarium isn't in the community plugin directory (yet). Build it from source:
 
 **Requirements:** Obsidian 1.5+ (desktop), Node 20+, `tmux` (`brew install tmux` / `sudo apt install tmux`).
-App tiles on macOS additionally need macOS 14+ and the Xcode Command Line Tools.
+App tiles on macOS additionally need macOS 14+ and the Xcode Command Line Tools; on Linux a Wayland
+session plus `sudo apt install cargo pkg-config libxkbcommon-dev libgbm-dev` (`update.sh` then builds
+the helper).
 
 ```sh
 git clone git@github.com:Encrux/vivarium.git && cd vivarium
@@ -139,6 +141,12 @@ lives on an invisible virtual display and is streamed into the tile. Click the t
 window comes forward over it, so you use the actual app. Click the canvas to send it back. This
 needs **Screen Recording** and **Accessibility** for Obsidian (System Settings → Privacy & Security).
 Prefer **web tiles** for anything that runs in a browser: they're instant and never switch focus.
+
+**App tiles (Linux, experimental).** Pick an app in the picker. It runs inside Vivarium's own hidden
+Wayland display, so the app lives *in* the tile: click and type into it directly, no window comes
+forward. Apps keep running when you quit Obsidian, and are started again after a logout or reboot.
+Firefox runs with its own clean profile, separate from your normal one. Details:
+[helper/linux/README.md](helper/linux/README.md).
 
 ## Vaults in git (or synced)
 
@@ -208,32 +216,50 @@ Measured with **30 terminals each printing ~20 coloured lines/s** (Obsidian 1.15
 
 ## Status
 
-✅ works · 🧪 experimental (works, rough edges) · 🚧 in progress · 💡 idea, not scheduled (discussion
-in the linked issue) · ❌ not planned · ➖ doesn't apply
+**Works**: use it. **Experimental**: works, with rough edges or little real-world testing.
+Ideas and things that aren't planned are listed [below the tables](#not-yet).
 
-| | macOS | Linux | Notes |
+### Tiles
+
+| Feature | macOS | Linux | Notes |
 |---|---|---|---|
-| **Tiles** | | | |
-| Terminal tiles | ✅ | ✅ | Linux: tested on Ubuntu 26.04. tmux 3.8+ recommended, see [Caveats](#caveats) |
-| Web tiles | ✅ | 🧪 | Linux: should work, little tested |
-| App tiles: apps started from the canvas | 🧪 | 🚧 | macOS: real windows on an invisible display. Linux: Vivarium's own hidden Wayland display ([helper](helper/linux)) |
-| App tiles: GPU-rendered apps | ✅ | 🚧 | |
-| App tiles: windows that are already open (e.g. your real Firefox with its profile) | 🧪 | 💡 [#4](https://github.com/Encrux/vivarium/issues/4) | Linux: Firefox in a tile uses its own clean profile |
-| Semantic zoom | ✅ | ✅ | |
-| **Things keep running** | | | |
-| Survive quitting Obsidian | ✅ | ✅ | tmux keeps the programs; app tiles' apps: macOS ✅, Linux 🚧 |
-| Come back after a reboot, crash or logout | ✅ | ✅ | agents resume their own conversation |
-| Keep running *through* a logout | ❌ | 🧪 | Linux: tmux in its own systemd scope + `loginctl enable-linger` |
-| **Agents** | | | |
-| `vivarium` CLI + agent skill (Codex, Claude Code, …) | ✅ | ✅ | installed by the plugin |
-| Resume / fork a tile's own conversation | ✅ | ✅ | Claude Code, Codex |
-| **Sharing** | | | |
-| Vault in git or sync as a backup | ✅ | ✅ | synced tiles wait for **Start**, see [Vaults in git](#vaults-in-git-or-synced) |
-| Continue a tile on another machine (agent conversations, processes) | 💡 [#2](https://github.com/Encrux/vivarium/issues/2) | 💡 | today: the canvas syncs, agents start fresh there |
-| Several people on one canvas, live | 💡 [#1](https://github.com/Encrux/vivarium/issues/1) | 💡 | live tiles run on the host's machine: needs view-only / hand-over modes |
-| **Platforms** | | | |
-| Windows | ➖ | ➖ | ❌ for now (no tmux): [#3](https://github.com/Encrux/vivarium/issues/3) |
-| Obsidian mobile (iOS, Android) | ➖ | ➖ | ❌ no local processes on mobile |
+| Terminal tiles | **Works** | **Works** | Linux: tested on Ubuntu 26.04; tmux 3.8+ recommended ([Caveats](#caveats)) |
+| Web tiles | **Works** | Experimental | Linux: should work, little tested |
+| Semantic zoom | **Works** | **Works** | |
+| App tiles: apps started from the canvas | Experimental | Experimental | Linux: tested end to end in Docker, not yet much on a real desktop |
+| App tiles: GPU-rendered apps | **Works** | Experimental | Linux: GPU path only tested with software GL; without a GPU it renders on the CPU |
+| App tiles: windows that are already open | Experimental | No ([#4](https://github.com/Encrux/vivarium/issues/4)) | Linux: Firefox in a tile has its own clean profile, one Firefox tile at a time |
+
+### Things keep running
+
+| Feature | macOS | Linux | Notes |
+|---|---|---|---|
+| Programs survive quitting Obsidian | **Works** | **Works** | Linux app tiles: experimental |
+| Tiles come back after a reboot, crash or logout | **Works** | **Works** | agents resume their own conversation; Linux app tiles: experimental |
+| Programs keep running *through* a logout | No | Experimental | Linux: needs `loginctl enable-linger` once |
+
+### Agents and sharing
+
+| Feature | macOS | Linux | Notes |
+|---|---|---|---|
+| `vivarium` CLI + agent skill | **Works** | **Works** | Codex, Claude Code and other harnesses; installed by the plugin |
+| Resume or fork a tile's own conversation | **Works** | **Works** | Claude Code, Codex |
+| Vault in git or synced, as a backup | **Works** | **Works** | synced tiles wait for **Start** ([Vaults in git](#vaults-in-git-or-synced)) |
+
+### Not yet
+
+Ideas, not scheduled. Each issue collects the design questions; comments welcome.
+
+- **Several people on one canvas, live**: [#1](https://github.com/Encrux/vivarium/issues/1).
+  Live tiles run on the host's machine, so this needs view-only and hand-over modes.
+- **Continue a tile on another machine** (agent conversations, processes): [#2](https://github.com/Encrux/vivarium/issues/2).
+  Today the canvas syncs, and agents start fresh there.
+- **Linux: already-open windows in app tiles** (e.g. your real Firefox with its profile): [#4](https://github.com/Encrux/vivarium/issues/4).
+
+Not planned for now:
+
+- **Windows**: no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)).
+- **Obsidian mobile**: no local programs on iOS or Android.
 
 Something missing or broken? [Open an issue](https://github.com/Encrux/vivarium/issues).
 

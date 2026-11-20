@@ -6,7 +6,7 @@
 Terminals, coding agents, dev servers and web pages as tiles next to your notes. They keep running
 while you pan away, close the canvas or quit Obsidian.
 
-<img src="docs/media/hero.gif" alt="Adding an htop terminal and boesch.dev as live tiles on an Obsidian canvas" width="900">
+<img src="docs/media/hero.gif" alt="Right-click on a canvas, add npm run dev as a terminal tile, rename it Dev server, then drag in a web tile showing the running app" width="900">
 
 </div>
 
@@ -32,12 +32,12 @@ are kept at screen size, like labels on a map, while live tiles freeze on their 
 
 Every tile knows who it is (`$VIVARIUM_TILE`), so a coding agent running in one can open programs
 next to itself, fork its own conversation into a new tile, leave notes, and read or type into
-other tiles. Below, Claude Code (Haiku) gets a single prompt: *"start this project's dev server in a
-new tile next to you, then leave a one-line note saying what you started"*. It opens the server in
-a tile beside itself and leaves the note. This is a real, unedited run. (It was recorded before
-agents got the skill, so it still starts with `vivarium help`; today that step is skipped.)
+other tiles. Below, Claude Code (Haiku) gets one prompt: *"Start the dev server in a tile next to
+you. Then fork yourself into a new tile and have the fork add a /health endpoint."* It opens the
+server beside itself, then forks its own conversation into a new tile, which goes on to write the
+endpoint. This is a real run, fast-forwarded while the agents work.
 
-<img src="docs/media/agents.gif" alt="Claude Code in a terminal tile runs vivarium help, vivarium add and vivarium note; a dev server tile and a note card appear next to it, connected by arrows" width="900">
+<img src="docs/media/agents.gif" alt="Claude Code in a terminal tile opens a dev server tile next to itself and forks its conversation into a second Claude Code tile, connected by a fork arrow" width="900">
 
 ```sh
 vivarium add -- npm run dev            # new tile beside me, connected with an arrow
@@ -64,7 +64,7 @@ Canvas unmounts card content below ~30% zoom to stay fast, and text cards go bla
 replaces them with each card's first heading at a readable size, then hands over to group titles
 when cards become specks:
 
-<img src="docs/media/zoom.gif" alt="Zooming out of a workspace: card headlines stay readable, then group titles; zooming back in shows a live terminal and web page" width="900">
+<img src="docs/media/zoom.gif" alt="Zooming out of a workspace from live terminals and a web preview: card headlines stay readable, then group titles; then into another group and back" width="900">
 
 ### Things keep running
 
@@ -235,7 +235,8 @@ npm run build:helper   # rebuild the Swift helper (macOS)
 ```
 
 Open `dev-vault/` as a vault, or install into another one with `sh scripts/update.sh <vault>`.
-Toggle the plugin to reload it. `sh scripts/tmux-crash.sh` prints a stack trace of the latest tmux
+Toggle the plugin to reload it. `node scripts/record-demos/record.mjs` re-records the README videos
+in an isolated Obsidian instance (macOS). `sh scripts/tmux-crash.sh` prints a stack trace of the latest tmux
 crash (Ubuntu). The helper speaks a small JSON-lines / framed-binary protocol over stdin/stdout
 (`helper/macos/Sources/VivariumHelper/Protocol.swift`), so a Linux helper can slot in behind the
 same plugin code.

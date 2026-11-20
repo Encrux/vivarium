@@ -21,7 +21,7 @@ you're working with next to the notes about them, on one infinite plane.
 |---|---|---|
 | **Terminal** | Any command (`zsh`, `claude`, `codex`, `npm run dev`, `htop`) in a real terminal, backed by tmux | Native: keystroke → echo in **0.6 ms** (p50) |
 | **Web** | A real browser page inside the card (`localhost:3000`, docs, dashboards) | Native: direct input, scales with the canvas, Obsidian keeps focus |
-| **App window** *(macOS, experimental)* | Any app's window as a live preview; click it to work in the real window | Live preview at 60 fps; native once clicked |
+| **App window** *(macOS, experimental; Linux in progress)* | Any app's window as a live preview; click it to work in the real window | Live preview at 60 fps; native once clicked |
 
 Plus **semantic zoom**: zoom out and your workspace stays readable. Card headlines and group titles
 are kept at screen size, like labels on a map, while live tiles freeze on their last picture.
@@ -31,10 +31,11 @@ are kept at screen size, like labels on a map, while live tiles freeze on their 
 ### Agents can arrange the canvas
 
 Every tile knows who it is (`$VIVARIUM_TILE`), so a coding agent running in one can open programs
-next to itself, leave notes, and read or type into other tiles. Below, Claude Code (Haiku) gets a
-single prompt: *"start this project's dev server in a new tile next to you, then leave a one-line note
-saying what you started"*. It reads `vivarium help`, opens the server in a tile beside itself and
-leaves the note. This is a real, unedited run.
+next to itself, fork its own conversation into a new tile, leave notes, and read or type into
+other tiles. Below, Claude Code (Haiku) gets a single prompt: *"start this project's dev server in a
+new tile next to you, then leave a one-line note saying what you started"*. It opens the server in
+a tile beside itself and leaves the note. This is a real, unedited run. (It was recorded before
+agents got the skill, so it still starts with `vivarium help`; today that step is skipped.)
 
 <img src="docs/media/agents.gif" alt="Claude Code in a terminal tile runs vivarium help, vivarium add and vivarium note; a dev server tile and a note card appear next to it, connected by arrows" width="900">
 
@@ -80,6 +81,8 @@ when cards become specks:
 
   Tiles you stopped on purpose stay stopped. Snapshots of recent output are kept per device in
   `~/.vivarium/snapshots/` (mode 0600), never in the vault.
+- **Even tmux crashing is survivable.** If the tmux server dies, Vivarium reconnects and brings
+  back what was running the same way.
 - **Attach from anywhere:** `tmux -L vivarium attach -t vivarium:<id>`, or `vivarium attach`.
 - **Web tiles remember their page** and keep their logins (own browser profile).
 
@@ -87,21 +90,19 @@ when cards become specks:
 
 Vivarium isn't in the community plugin directory (yet). Build it from source:
 
-**Requirements:** Obsidian 1.5+ (desktop), Node 20+, `tmux` (`brew install tmux` / `apt install tmux`).
-App tiles additionally need macOS 14+ and the Xcode Command Line Tools.
+**Requirements:** Obsidian 1.5+ (desktop), Node 20+, `tmux` (`brew install tmux` / `sudo apt install tmux`).
+App tiles on macOS additionally need macOS 14+ and the Xcode Command Line Tools.
 
 ```sh
 git clone git@github.com:Encrux/vivarium.git && cd vivarium
-npm install
-npm run build:helper   # macOS only: the native helper for app tiles (optional)
-npm run build          # → dev-vault/.obsidian/plugins/vivarium/
-
-# link it into your vault and enable "Vivarium" under Settings → Community plugins
-ln -s "$PWD/dev-vault/.obsidian/plugins/vivarium" "<your vault>/.obsidian/plugins/vivarium"
+npm run build:helper                       # macOS only, optional: the helper for app tiles
+sh scripts/update.sh ~/path/to/your/vault  # builds and installs into the vault
 ```
 
-The `vivarium` CLI and the agent skill install themselves when the plugin loads. To update later:
-`sh scripts/update.sh <your vault>`.
+Then enable **Vivarium** under Settings → Community plugins. To update later, run
+`sh scripts/update.sh` again (it remembers the vault) and turn the plugin off and on.
+
+The `vivarium` CLI and the agent skill install themselves when the plugin loads.
 
 ## Using it
 
@@ -115,9 +116,18 @@ The `vivarium` CLI and the agent skill install themselves when the plugin loads.
 | Hotkeys | each preset (Shell, Claude Code, Codex, htop, …) has its own command you can bind |
 
 **Work in it.** Click a tile to select it, then click or type inside it. Unselected tiles never take
-your scroll wheel, so panning a crowded canvas stays smooth. Each tile is a small file in `Vivarium/`
-(`.term`, `.web`, `.window`). Open it in a tab, embed it in a note with `![[htop.term]]`, or delete it to
-stop the program.
+your scroll wheel, so panning a crowded canvas stays smooth. While a terminal has focus, every key
+goes to the program (arrows, Ctrl+C, Ctrl+R, …) except Obsidian's own shortcuts: Cmd+… on macOS,
+Ctrl+Shift+… on Linux, where Ctrl+Shift+C / V copy and paste, as in other Linux terminals.
+Clicking a link in a terminal opens it in your default browser.
+
+**Name it.** Double-click a tile's name (or right-click → *Rename tile…*). Each tile is a small file
+in `Vivarium/` (`.term`, `.web`, `.window`). Open it in a tab, embed it in a note with
+`![[htop.term]]`, or delete it to stop the program.
+
+**Coding agents.** The *Codex* preset runs `codex --no-alt-screen`, so the tile scrolls through the
+conversation like a normal terminal. (Codex's full-screen mode keeps its history to itself; there,
+the wheel recalls old prompts.)
 
 **App tiles (macOS).** Pick an app (Safari, Simulator, Figma, …) in the picker. The real window
 lives on an invisible virtual display and is streamed into the tile. Click the tile and the real
@@ -182,10 +192,10 @@ Measured with **30 terminals each printing ~20 coloured lines/s** (Obsidian 1.15
 
 | | macOS | Linux |
 |---|---|---|
-| Terminal tiles | ✅ | should work (tmux + Node); untested |
+| Terminal tiles | ✅ | ✅ (Ubuntu 26.04, tmux 3.6a) |
 | Web tiles | ✅ | should work; untested |
-| App tiles | ✅ experimental | planned: virtual display per app via Xpra |
-| `vivarium` CLI | ✅ | should work; untested |
+| App tiles | ✅ experimental | in progress: a native Wayland helper |
+| `vivarium` CLI + agent skill | ✅ | ✅ |
 
 Windows isn't supported (no tmux).
 
@@ -199,6 +209,9 @@ Windows isn't supported (no tmux).
 - **App tiles rely on a private macOS API** (`CGVirtualDisplay`, also used by DeskPad and
   BetterDisplay). Using an app still switches focus to it, as macOS requires.
 - **Granting Accessibility to Obsidian** lets any Obsidian plugin post input to other apps.
+- **tmux before 3.8 crashes** when a pane is restarted with `respawn-pane` while a control client is
+  attached (tmux issue 5498). Vivarium never does that (Restart opens a new window), but other
+  tools attached to the same tmux server could.
 
 ## Development
 
@@ -208,8 +221,9 @@ npm run build          # typecheck + build once
 npm run build:helper   # rebuild the Swift helper (macOS)
 ```
 
-Open `dev-vault/` as a vault, or symlink the plugin folder into another vault. Toggle the plugin to
-reload it. The helper speaks a small JSON-lines / framed-binary protocol over stdin/stdout
+Open `dev-vault/` as a vault, or install into another one with `sh scripts/update.sh <vault>`.
+Toggle the plugin to reload it. `sh scripts/tmux-crash.sh` prints a stack trace of the latest tmux
+crash (Ubuntu). The helper speaks a small JSON-lines / framed-binary protocol over stdin/stdout
 (`helper/macos/Sources/VivariumHelper/Protocol.swift`), so a Linux helper can slot in behind the
 same plugin code.
 

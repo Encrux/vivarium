@@ -44,9 +44,18 @@ export class SemanticZoom {
 		let raf: number | null = null;
 		const self = this;
 		// Instance-level wrap (not the prototype): Canvas calls this whenever pan/zoom changes.
+		// Canvas eases zoom/pan towards a target (tZoom) over several frames after one wheel event,
+		// without calling markViewportChanged again: keep updating until it arrives, or the state
+		// (zoomed out or not) would be decided on a zoom level that's already gone.
+		const tick = () => {
+			raf = null;
+			self.update(canvas);
+			const moving = typeof canvas.tZoom === "number" && Math.abs(canvas.zoom - canvas.tZoom) > 0.002;
+			if (moving) raf = requestAnimationFrame(tick);
+		};
 		canvas.markViewportChanged = function (...args: any[]) {
 			const r = orig.apply(this, args);
-			if (raf === null) raf = requestAnimationFrame(() => ((raf = null), self.update(canvas)));
+			if (raf === null) raf = requestAnimationFrame(tick);
 			return r;
 		};
 		this.hooked.set(canvas, () => {

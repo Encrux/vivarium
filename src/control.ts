@@ -10,6 +10,7 @@ import * as path from "path";
 import { TFile } from "obsidian";
 import type VivariumPlugin from "./main";
 import { TILE_EXT } from "./core";
+import { resumeCommand } from "./keeper";
 
 type Req = { op: string; [k: string]: any };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -79,8 +80,11 @@ export class ControlServer {
 
 	// ---------- helpers ----------
 
+	/** Open canvases, the one you're looking at first (a tile can be on several). */
 	private canvases(): any[] {
-		return this.plugin.app.workspace.getLeavesOfType("canvas").map((l) => (l.view as any).canvas).filter(Boolean);
+		const all = this.plugin.app.workspace.getLeavesOfType("canvas").map((l) => (l.view as any).canvas).filter(Boolean);
+		const active = this.plugin.activeCanvas();
+		return active && all.includes(active) ? [active, ...all.filter((c) => c !== active)] : all;
 	}
 
 	/** Find the canvas node showing a tile (by tile id) across open canvases. */
@@ -129,7 +133,8 @@ export class ControlServer {
 		if (f?.extension === TILE_EXT) {
 			const spec = await this.plugin.core.readSpec(f);
 			const pane = spec ? this.plugin.core.hub.getPane(spec.id) : undefined;
-			return { ...base, kind: "program", id: spec?.id, title: spec?.title, command: spec?.command, file: f.path, running: !!pane && !pane.dead };
+			// title: the name on the card (the file name), which is what you see and rename
+			return { ...base, kind: "program", id: spec?.id, title: f.basename, command: spec?.command, file: f.path, running: !!pane && !pane.dead };
 		}
 		if (f) return { ...base, kind: "file", file: f.path };
 		if (node.text !== undefined) return { ...base, kind: "text", text: String(node.text).slice(0, 200) };
@@ -159,6 +164,9 @@ export class ControlServer {
 		const w = req.width ?? s.tileWidth, h = req.height ?? s.tileHeight;
 		let canvas: any, pos: { x: number; y: number }, nearNode: any = null;
 		const near = req.near ? await this.findTile(req.near) : null;
+		// Never connect to some other tile by accident: an id that isn't on a canvas is an error.
+		if (req.near && !near && req.nearExplicit) throw new Error(`tile ${req.near} is not on an open canvas`);
+		const warning = req.near && !near ? `tile ${req.near} is not on an open canvas: placed on the active canvas, without an arrow` : undefined;
 		if (near) {
 			canvas = near.canvas;
 			nearNode = near.node;
@@ -176,7 +184,33 @@ export class ControlServer {
 		canvas.requestSave();
 		const spec = await this.plugin.core.readSpec(file);
 		if (req.reveal !== false) canvas.panIntoView?.(node.getBBox());
-		return { id: spec?.id, file: file.path, nodeId: node.id, x: node.x, y: node.y };
+		return { id: spec?.id, title: file.basename, file: file.path, nodeId: node.id, x: node.x, y: node.y, warning };
+	}
+
+	/** Who am I: a tile's card, folder and coding-agent conversation. */
+	async op_me(req: Req) {
+		if (!req.id) throw new Error("not inside a Vivarium tile ($VIVARIUM_TILE is not set)");
+		const t = await this.findTile(req.id);
+		const live = await this.plugin.core.keeper.inspect(req.id).catch(() => null);
+		const card: any = t ? await this.nodeInfo(t.canvas, t.node) : null;
+		return { id: req.id, title: card?.title, canvas: card?.canvas ?? null, cwd: live?.cwd, agent: live?.agent ?? null, running: !!live };
+	}
+
+	/**
+	 * Continue a tile's coding-agent conversation in a new tile next to it (codex fork / claude
+	 * --fork-session), linked with a "fork" arrow. `session`: the agent's own id for itself (Codex
+	 * passes $CODEX_THREAD_ID to its commands), else we look at what runs in the tile.
+	 */
+	async op_fork(req: Req) {
+		const t = await this.findTile(req.id);
+		if (!t) throw new Error(`tile ${req.id} is not on an open canvas`);
+		const spec = await this.plugin.core.readSpec(t.file);
+		const live = await this.plugin.core.keeper.inspect(req.id);
+		let agent = live?.agent ?? null;
+		if (req.session && /^[\w-]{8,}$/.test(req.session)) agent = { kind: req.kind === "claude" ? "claude" : (agent?.kind ?? "codex"), sessionId: req.session };
+		if (!agent) throw new Error("no Codex or Claude Code conversation found in this tile (Codex only has one after the first message)");
+		const command = resumeCommand(spec?.command.trim() ?? "", agent, true, req.prompt ?? "");
+		return this.op_add({ op: "add", command, title: req.title || `${t.file.basename} fork`, cwd: live?.cwd, near: req.id, nearExplicit: true, label: "fork" });
 	}
 
 	/** Add a text card (agents leaving notes/plans next to their tile). */

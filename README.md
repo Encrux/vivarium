@@ -40,12 +40,17 @@ leaves the note. This is a real, unedited run.
 
 ```sh
 vivarium add -- npm run dev            # new tile beside me, connected with an arrow
+vivarium fork "try it with SQLite"     # continue this conversation in a new tile beside me
 vivarium note "Plan: 1) … 2) …"        # text card beside me
+vivarium send t3k9x2a "npm test" --wait  # type a command, wait until it's done, print the screen
 vivarium read t3k9x2a --lines 50       # what does that program show?
-vivarium send t3k9x2a "npm test"       # type a command (+ Enter)
 ```
 
-Telling an agent *"you're in a Vivarium tile, run `vivarium help`"* is enough for it to use this.
+Run `vivarium setup` once: it tells Codex and Claude Code about the CLI (in `~/.codex/AGENTS.md`
+and `~/.claude/CLAUDE.md`), so they use it without exploring first. It also lets Codex run the
+read-only and canvas commands (`ls me read wait note fork move focus`) outside its sandbox
+without asking (`~/.codex/rules/vivarium.rules`). Commands that start or drive programs
+(`add send keys rm`) still ask.
 
 ### Big workspaces stay readable
 

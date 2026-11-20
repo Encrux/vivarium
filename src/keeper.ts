@@ -151,6 +151,14 @@ export class SessionKeeper {
 		return { launch: { command: `${shell} -l`, typeIn: resume }, cwd };
 	}
 
+	/** What a tile runs right now: its folder and coding agent (looked up fresh, not from the last tick). */
+	async inspect(tileId: string): Promise<{ cwd: string; agent: RunState["agent"] | null } | null> {
+		const [rows, tree] = await Promise.all([this.core.hub.listPaneInfo(), processTree()]);
+		const r = rows.find((x) => x.tileId === tileId);
+		if (!r) return null;
+		return { cwd: r.cwd, agent: r.dead ? null : await findAgent(r.panePid, tree) };
+	}
+
 	/** On startup, or after the tmux server died: bring back every tile that was running, without waiting for its canvas. */
 	async restoreAll(why = "after restart") {
 		const files = this.core.app.vault.getFiles().filter((f) => f.extension === "term");
@@ -190,18 +198,22 @@ function processTree(): Promise<Tree> {
 	});
 }
 
-/** The command that reopens this tile's conversation, keeping the tile's own flags (model etc.). */
-function resumeCommand(own: string, agent: NonNullable<RunState["agent"]>): string | null {
+/**
+ * The command that reopens this tile's conversation, keeping the tile's own flags (model etc.).
+ * With `fork`, a copy of it that continues separately (optionally with a first prompt).
+ */
+export function resumeCommand(own: string, agent: NonNullable<RunState["agent"]>, fork = false, prompt = ""): string | null {
+	const p = prompt.trim() ? " " + q(prompt.trim()) : "";
 	if (agent.kind === "claude") {
-		const base = own.startsWith("claude") ? own.replace(/\s+(--resume|-r|--continue|-c)(\s+[\w-]{8,})?/g, "") : "claude";
-		return `${base} --resume ${agent.sessionId}`;
+		const base = own.startsWith("claude") ? own.replace(/\s+(--resume|-r|--continue|-c|--fork-session)(\s+[\w-]{8,})?/g, "") : "claude";
+		return `${base} --resume ${agent.sessionId}${fork ? " --fork-session" : ""}${p}`;
 	}
 	if (agent.kind === "codex") {
-		// `codex resume <id> [flags]`. Only carry over plain flags: a prompt or another subcommand
-		// in the tile's command must not end up as part of the resume.
+		// `codex resume|fork <id> [flags]`. Only carry over plain flags: a prompt or another
+		// subcommand in the tile's command must not end up as part of it.
 		const [bin, ...rest] = own.split(/\s+/).filter(Boolean);
 		const flags = bin && path.basename(bin) === "codex" && rest.every((t) => t.startsWith("-")) ? rest : [];
-		return ["codex", "resume", agent.sessionId, ...flags].join(" ");
+		return ["codex", fork ? "fork" : "resume", agent.sessionId, ...flags].join(" ") + p;
 	}
 	return null;
 }

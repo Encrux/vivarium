@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
-    "build:helper": "cd helper/macos && swift build -c release"
+    "build:helper": "cd helper/macos && swift build -c release",
+    "build:helper-linux": "cd helper/linux && cargo build --release --locked"
   },
   "license": "UNLICENSED",
   "devDependencies": {

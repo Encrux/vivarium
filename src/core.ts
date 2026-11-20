@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { findTmux, TmuxHub } from "./tmux";
 import { TerminalSurface, themeFromCss } from "./terminal";
-import { HelperClient, helperBinary } from "./helper";
+import { HelperClient, helperBinary, helperSocketPath } from "./helper";
 import type { SemanticZoom } from "./zoom";
 import { SessionKeeper } from "./keeper";
 import { BIN_DIR } from "./agents";
@@ -100,7 +100,9 @@ export class VivariumCore {
 	constructor(public app: App, public settings: VivariumSettings, private pluginDir: string) {
 		this.hub = this.makeHub();
 		const bin = helperBinary(pluginDir);
-		if (bin) this.helper = new HelperClient(bin);
+		// Linux: a daemon the apps live in, so they survive Obsidian closing (see helper.ts).
+		const vaultPath: string = (app.vault.adapter as any).getBasePath?.() ?? app.vault.getName();
+		if (bin) this.helper = new HelperClient(bin, process.platform === "linux" ? helperSocketPath(vaultPath) : null);
 	}
 
 	private makeHub(): TmuxHub {

@@ -2,7 +2,9 @@ import { Component, ItemView, Menu, Plugin, PluginSettingTab, Setting, TFile, Ap
 import { VivariumCore, VivariumSettings, DEFAULT_SETTINGS, Program, TILE_EXT } from "./core";
 import { TermEmbed, TermView, VIEW_TYPE } from "./embed";
 import { Picked, ProgramPicker } from "./programs";
-import { WINDOW_EXT, WindowEmbed, WindowView, WINDOW_VIEW_TYPE } from "./window";
+import { WINDOW_EXT, WindowEmbed, WindowView, WINDOW_VIEW_TYPE, readWindowSpec } from "./window";
+import { restoreLinuxApps } from "./linuxwindow";
+import { installFirefoxLaunch } from "./firefox";
 import { WEB_EXT, WebEmbed, WebView, WEB_VIEW_TYPE } from "./web";
 import type { AppInfo, WindowInfo } from "./helper";
 import { installCli, lingerEnabled, syncCodexRules, syncSkill } from "./agents";
@@ -40,6 +42,8 @@ export default class VivariumPlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		const pluginDir = `${(this.app.vault.adapter as any).getBasePath()}/${this.manifest.dir}`;
 		this.core = new VivariumCore(this.app, this.settings, pluginDir);
+		// Linux app tiles: Firefox gets its own profile so it opens in the tile (see firefox.ts)
+		if (process.platform === "linux" && this.core.helper) installFirefoxLaunch(this.core);
 		this.setUpAgents(pluginDir);
 		this.core.initTrust();
 		this.zoom = new SemanticZoom(
@@ -108,6 +112,11 @@ export default class VivariumPlugin extends Plugin {
 			this.hookCanvases();
 			// After a reboot/crash: bring back what was running (Claude Code resumes its own session).
 			this.core.keeper.restoreAll().catch((e) => console.warn("[vivarium] restore", e)).finally(() => this.core.keeper.start());
+			// Linux app tiles: after a reboot/logout their apps are gone with the helper; start them again.
+			if (process.platform === "linux" && this.core.helper) {
+				const files = this.app.vault.getFiles().filter((f) => f.extension === WINDOW_EXT);
+				restoreLinuxApps(this.core, files, (f) => readWindowSpec(this.core, f)).catch((e) => console.warn("[vivarium] restore apps", e));
+			}
 			// If the plugin was (re)enabled with canvases open, their .term cards show the old
 			// (or no) embed; rebuild them with ours.
 			this.forEachTermNode((n) => {
@@ -145,13 +154,14 @@ export default class VivariumPlugin extends Plugin {
 			}),
 		);
 		this.registerEvent(this.app.vault.on("create", (f) => f instanceof TFile && f.extension === TILE_EXT && this.cacheId(f)));
-		// Deleting an app tile hands its window back to your desktop (the app keeps running).
+		// Deleting an app tile hands its window back to your desktop (the app keeps running). On
+		// Linux the window only exists in the tile, so it's closed instead.
 		this.registerEvent(
 			this.app.vault.on("delete", (f) => {
 				const w = this.core.attachedWindows.get(f.path);
 				if (!w) return;
 				this.core.attachedWindows.delete(f.path);
-				this.core.helper?.request("unpark", w).catch(() => {});
+				this.core.helper?.request(process.platform === "linux" ? "close" : "unpark", w).catch(() => {});
 			}),
 		);
 		this.registerEvent(this.app.vault.on("rename", (f, old) => {

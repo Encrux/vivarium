@@ -257,7 +257,11 @@ Something missing or broken? [Open an issue](https://github.com/Encrux/vivarium/
 npm run dev            # rebuild on change into dev-vault/
 npm run build          # typecheck + build once
 npm run build:helper   # rebuild the Swift helper (macOS)
+npm run build:helper-linux   # rebuild the Rust helper (Linux; scripts/update.sh does it when cargo is installed)
 ```
+
+Linux app tiles: `helper/linux/README.md` (daemon, GPU path, what survives logout/reboot), tested
+end to end with a real Linux Obsidian in Docker by `helper/linux/scripts/test-e2e.sh`.
 
 Open `dev-vault/` as a vault, or install into another one with `sh scripts/update.sh <vault>`.
 Toggle the plugin to reload it. `node scripts/record-demos/record.mjs` re-records the README videos

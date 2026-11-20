@@ -34,6 +34,15 @@ const ctx = await esbuild.context({
 				fs.copyFileSync(mac, tmp);
 				fs.renameSync(tmp, dst);
 			}
+			// Linux helper (built by scripts/update.sh or `npm run build:helper-linux`), named per arch.
+			const linux = "helper/linux/target/release/vivarium-helper-linux";
+			if (process.platform === "linux" && fs.existsSync(linux)) {
+				// Replace, never overwrite in place: a running daemon has the old file open (ETXTBSY).
+				const dst = `${outdir}/vivarium-helper-linux-${process.arch}`, tmp = `${dst}.tmp`;
+				fs.copyFileSync(linux, tmp);
+				fs.chmodSync(tmp, 0o755);
+				fs.renameSync(tmp, dst);
+			}
 		}); },
 	}],
 });

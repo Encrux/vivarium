@@ -1,0 +1,27 @@
+[package]
+name = "vivarium-helper-linux"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Headless Wayland compositor that turns app windows into Vivarium tiles"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "vivarium-helper-linux"
+path = "src/main.rs"
+
+[dependencies]
+# Only the protocol side of Smithay: no DRM/GBM/EGL/libinput/winit, no renderer. We never show
+# anything ourselves, so the binary runs under X11 and Wayland desktops alike.
+smithay = { version = "=0.7.0", default-features = false, features = ["desktop", "wayland_frontend"] }
+serde_json = "=1.0.154"
+memmap2 = "=0.9.12"
+libc = "=0.2.183"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+strip = true

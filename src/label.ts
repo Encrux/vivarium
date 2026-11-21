@@ -87,11 +87,11 @@ class RenameModal extends Modal {
 		};
 		new Setting(this.contentEl).addText((t) => {
 			t.setValue(value).onChange((v) => (value = v));
-			t.inputEl.style.width = "100%";
+			t.inputEl.addClass("vivarium-rename-input");
 			t.inputEl.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" && !e.isComposing) {
 					e.preventDefault();
-					submit();
+					void submit();
 				}
 			});
 			window.setTimeout(() => {

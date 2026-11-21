@@ -128,13 +128,14 @@ http.createServer((req, res) => {
 	const obs = path.join(VAULT, ".obsidian");
 	const plug = path.join(obs, "plugins/vivarium");
 	const build = path.join(ROOT, "dev-vault/.obsidian/plugins/vivarium");
-	for (const f of ["main.js", "manifest.json", "styles.css", "vivarium", "SKILL.md"]) {
+	for (const f of ["main.js", "manifest.json", "styles.css"]) {
 		if (!fs.existsSync(path.join(build, f))) throw new Error(`missing ${f}: run npm run build first`);
 		w(path.join(plug, f), fs.readFileSync(path.join(build, f)));
 	}
-	fs.chmodSync(path.join(plug, "vivarium"), 0o755);
 	w(path.join(plug, "data.json"), JSON.stringify({
 		socketName: SOCKET, tileFolder: "Vivarium", defaultCwd: APP_DIR, fontSize: 14, tileWidth: 480, tileHeight: 330,
+		// the agents demo needs the vivarium command; no first-run prompt in the videos
+		agentIntegration: true, agentPromptShown: true,
 		programs: [
 			{ name: "Shell", command: "", cwd: "" },
 			{ name: "Claude Code", command: "claude", cwd: "" },

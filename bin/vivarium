@@ -56,14 +56,24 @@ function parse(argv) {
 function die(msg) { process.stderr.write(`vivarium: ${msg}\n`); process.exit(1); }
 
 function sockPath(vault) {
+	// inside a tile: exactly its own vault's socket
+	if (!vault && process.env.VIVARIUM_SOCKET && fs.existsSync(process.env.VIVARIUM_SOCKET)) return process.env.VIVARIUM_SOCKET;
 	const dir = path.join(os.homedir(), ".vivarium");
-	vault = vault || process.env.VIVARIUM_VAULT; // set inside tiles: talk to the tile's own vault
+	vault = vault || process.env.VIVARIUM_VAULT; // older tiles only know their vault's name
 	let socks = [];
 	try { socks = fs.readdirSync(dir).filter((f) => f.endsWith(".sock")); } catch {}
-	if (vault) return path.join(dir, vault.replace(/[^\w.-]+/g, "_") + ".sock");
+	// sockets are "<vault>-<hash of its path>.sock" (two vaults can share a name)
+	const name = (f) => f.slice(0, -5).replace(/-[0-9a-f]{8}$/, "");
+	if (vault) {
+		const want = vault.replace(/[^\w.-]+/g, "_");
+		const hits = socks.filter((f) => name(f) === want);
+		if (hits.length === 1) return path.join(dir, hits[0]);
+		if (hits.length > 1) die(`several open vaults are called "${vault}"; run this inside one of its tiles`);
+		die(`no running Obsidian vault "${vault}" with Vivarium`);
+	}
 	if (socks.length === 1) return path.join(dir, socks[0]);
 	if (!socks.length) die("Obsidian with the Vivarium plugin doesn't seem to be running (no socket in ~/.vivarium).");
-	die(`several vaults are running Vivarium (${socks.map((s) => s.slice(0, -5)).join(", ")}); pass --vault NAME`);
+	die(`several vaults are running Vivarium (${socks.map(name).join(", ")}); pass --vault NAME`);
 }
 
 function rpc(vault, req) {

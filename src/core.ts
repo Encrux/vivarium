@@ -1,9 +1,8 @@
-import { App, Notice, normalizePath, TFile } from "obsidian";
+import { App, FileSystemAdapter, Notice, normalizePath, TFile } from "obsidian";
 import * as fs from "fs";
 import * as path from "path";
 import { findTmux, TmuxHub } from "./tmux";
 import { TerminalSurface, themeFromCss } from "./terminal";
-import { HelperClient, helperBinary, helperSocketPath } from "./helper";
 import type { SemanticZoom } from "./zoom";
 import { SessionKeeper } from "./keeper";
 import { BIN_DIR } from "./agents";
@@ -26,12 +25,20 @@ export interface VivariumSettings {
 	restoreLines: number;
 	optionIsMeta: boolean;
 	keepShellAfterExit: boolean;
-	/** Teach coding agents (Codex, Claude Code, …) the vivarium CLI with a skill (see agents.ts). */
-	agentSkill: boolean;
+	/**
+	 * Agent integration (opt-in, see agents.ts): the vivarium CLI in ~/.vivarium/bin (+ a link in
+	 * ~/.local/bin) on every tile's PATH, and a skill for coding agents in ~/.agents/skills and
+	 * ~/.claude/skills.
+	 */
+	agentIntegration: boolean;
+	/** Whether we've offered the agent integration once (a one-time prompt). */
+	agentPromptShown: boolean;
 	/** Let Codex run vivarium's read-only/canvas commands outside its sandbox without asking. */
 	codexRules: boolean;
 	/** Linux: run tmux in its own systemd scope, so programs can outlive your login (see TmuxHub.ownScope). */
 	ownScope: boolean;
+	/** Save recent terminal output to ~/.vivarium/snapshots so it's shown again after a reboot. */
+	snapshots: boolean;
 	tileWidth: number;
 	tileHeight: number;
 	programs: Program[];
@@ -48,9 +55,11 @@ export const DEFAULT_SETTINGS: VivariumSettings = {
 	restoreLines: 1000,
 	optionIsMeta: false,
 	keepShellAfterExit: true,
-	agentSkill: true,
+	agentIntegration: false,
+	agentPromptShown: false,
 	codexRules: false,
-	ownScope: true,
+	ownScope: false,
+	snapshots: true,
 	tileWidth: 640,
 	tileHeight: 400,
 	programs: [
@@ -88,21 +97,12 @@ export class VivariumCore {
 	private surfaces = new Set<TerminalSurface>();
 	private cachedTheme: ReturnType<typeof themeFromCss> | null = null;
 
-	/** Native helper for app tiles; null when not built for this platform. */
-	helper: HelperClient | null = null;
 	zoom: SemanticZoom | null = null;
 	/** Remembers what tiles run, so a reboot/crash can restore them (see keeper.ts). */
 	readonly keeper = new SessionKeeper(this);
-	private claims = new Map<number, unknown>(); // windowId → surface showing it
-	/** .window file path → the real window it shows (for "delete tile → give the window back"). */
-	readonly attachedWindows = new Map<string, { windowId: number; pid: number }>();
 
 	constructor(public app: App, public settings: VivariumSettings, private pluginDir: string) {
 		this.hub = this.makeHub();
-		const bin = helperBinary(pluginDir);
-		// Linux: a daemon the apps live in, so they survive Obsidian closing (see helper.ts).
-		const vaultPath: string = (app.vault.adapter as any).getBasePath?.() ?? app.vault.getName();
-		if (bin) this.helper = new HelperClient(bin, process.platform === "linux" ? helperSocketPath(vaultPath) : null);
 	}
 
 	private makeHub(): TmuxHub {
@@ -116,7 +116,7 @@ export class VivariumCore {
 			this.keeper.restoreAll("after tmux stopped unexpectedly").catch((e) => console.warn("[vivarium] restore", e));
 		};
 		hub.vaultName = this.app.vault.getName();
-		hub.pathPrefix = BIN_DIR; // the vivarium CLI, for programs and agents in tiles
+		hub.pathPrefix = this.settings.agentIntegration ? BIN_DIR : ""; // the vivarium CLI, for programs and agents in tiles
 		hub.ownScope = process.platform === "linux" && this.settings.ownScope;
 		return hub;
 	}
@@ -162,12 +162,12 @@ export class VivariumCore {
 	}
 
 	theme() {
-		return (this.cachedTheme ??= themeFromCss(document.body));
+		return (this.cachedTheme ??= themeFromCss(activeDocument.body));
 	}
 
 	fontFamily(): string {
 		if (this.settings.fontFamily) return this.settings.fontFamily;
-		const mono = getComputedStyle(document.body).getPropertyValue("--font-monospace").trim();
+		const mono = getComputedStyle(activeDocument.body).getPropertyValue("--font-monospace").trim();
 		return mono || "Menlo, Monaco, 'Courier New', monospace";
 	}
 
@@ -177,7 +177,8 @@ export class VivariumCore {
 	}
 
 	vaultPath(): string {
-		return (this.app.vault.adapter as any).getBasePath?.() ?? process.env.HOME ?? "/";
+		const a = this.app.vault.adapter;
+		return a instanceof FileSystemAdapter ? a.getBasePath() : (process.env.HOME ?? "/");
 	}
 
 	/**
@@ -213,8 +214,13 @@ export class VivariumCore {
 	initTrust() {
 		this.trusted = (this.app.loadLocalStorage("vivarium-trusted") as Record<string, string> | null) ?? null;
 		if (this.trusted) return;
-		// First run with this feature: tiles that exist now were already running unasked; keep that.
 		this.trusted = {};
+		// Upgrading from a version before this feature, on a device that already ran tiles: those were
+		// running unasked before, keep that. A fresh install trusts nothing it finds in the vault.
+		if (this.app.loadLocalStorage("vivarium-tile-state") === null) {
+			this.app.saveLocalStorage("vivarium-trusted", this.trusted);
+			return;
+		}
 		this.trustMigrating = true;
 		this.app.workspace.onLayoutReady(async () => {
 			for (const f of this.app.vault.getFiles().filter((x) => x.extension === TILE_EXT)) {
@@ -284,7 +290,7 @@ export class VivariumCore {
 
 	async readSpec(file: TFile): Promise<TileSpec | null> {
 		try {
-			const raw = JSON.parse(await this.app.vault.cachedRead(file));
+			const raw = JSON.parse(await this.app.vault.cachedRead(file)) as Partial<TileSpec> | null;
 			if (!raw || typeof raw.id !== "string") return null;
 			return { version: 1, id: raw.id, title: raw.title ?? file.basename, command: raw.command ?? "", cwd: raw.cwd ?? "" };
 		} catch {
@@ -309,6 +315,14 @@ export class VivariumCore {
 		await this.stopTile(spec.id);
 	}
 
+	/** Stop every tile's program, as "Stop program" does: nothing comes back until you press Start. */
+	async stopAll() {
+		await this.hub.ensureConnected().catch(() => {});
+		await this.hub.refreshPanes().catch(() => {});
+		for (const p of this.hub.allPanes()) await this.stopTile(p.tileId);
+		this.notice("stopped all programs");
+	}
+
 	/** Stop a tile's program on purpose: it also won't be restored after a restart. */
 	async stopTile(tileId: string) {
 		this.keeper.forget(tileId);
@@ -317,19 +331,6 @@ export class VivariumCore {
 
 	notice(msg: string) {
 		new Notice(`Vivarium: ${msg}`);
-	}
-
-	claimWindow(id: number, owner: unknown) {
-		this.claims.set(id, owner);
-	}
-
-	releaseWindow(id: number, owner: unknown) {
-		if (this.claims.get(id) === owner) this.claims.delete(id);
-	}
-
-	windowClaimedByOther(id: number, owner: unknown) {
-		const c = this.claims.get(id);
-		return c !== undefined && c !== owner;
 	}
 
 	/** Create a `.web` tile file for a page. */
@@ -342,25 +343,13 @@ export class VivariumCore {
 			const u = new URL(url);
 			// local files: their name; web: the host (github.com, localhost:3000)
 			host = title || (u.protocol === "file:" ? decodeURIComponent(u.pathname.split("/").pop() || "file") : u.host) || url;
-		} catch {}
+		} catch {
+			// best effort
+		}
 		const base = host.replace(/[\\/:*?"<>|#^[\]]/g, "-").trim().slice(0, 60) || "Web";
 		let p = normalizePath(`${folder}/${base}.web`);
 		for (let i = 2; this.app.vault.getAbstractFileByPath(p); i++) p = normalizePath(`${folder}/${base} ${i}.web`);
 		return this.app.vault.create(p, JSON.stringify({ version: 1, id, kind: "web", title: base, url }, null, 2) + "\n");
-	}
-
-	/** Create a `.window` tile file for an app (optionally pinned to an existing window). */
-	async createWindowFile(app: { name: string; bundleId: string; path?: string }, windowId?: number, titleHint?: string): Promise<TFile> {
-		const id = "w" + Math.random().toString(36).slice(2, 9);
-		const folder = normalizePath(this.settings.tileFolder || "Vivarium");
-		if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => {});
-		const base = (app.name || "App").replace(/[\\/:*?"<>|#^[\]]/g, "-").trim() || "App";
-		let p = normalizePath(`${folder}/${base}.window`);
-		for (let i = 2; this.app.vault.getAbstractFileByPath(p); i++) p = normalizePath(`${folder}/${base} ${i}.window`);
-		// which window it shows is per-device state, not part of the (committable) file
-		if (windowId !== undefined) this.setTileState(id, { windowId, titleHint });
-		const spec = { version: 1, id, kind: "app", title: app.name, app };
-		return this.app.vault.create(p, JSON.stringify(spec, null, 2) + "\n");
 	}
 
 	dispose() {
@@ -370,6 +359,5 @@ export class VivariumCore {
 			this.app.saveLocalStorage("vivarium-tile-state", this.stateCache);
 		}
 		this.hub.dispose();
-		this.helper?.dispose();
 	}
 }

@@ -8,6 +8,7 @@
  */
 import { Component, FileView, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type { VivariumCore } from "./core";
+import type { CanvasView, PageTitleEvent, WebviewElement } from "./internal";
 
 export const WEB_EXT = "web";
 export const WEB_VIEW_TYPE = "vivarium-web";
@@ -33,7 +34,7 @@ export function normalizeUrl(q: string): string | null {
 
 export async function readWebSpec(core: VivariumCore, file: TFile): Promise<WebSpec | null> {
 	try {
-		const raw = JSON.parse(await core.app.vault.cachedRead(file));
+		const raw = JSON.parse(await core.app.vault.cachedRead(file)) as Partial<WebSpec> | null;
 		if (!raw?.id || typeof raw.url !== "string") return null;
 		return { version: 1, kind: "web", id: raw.id, title: raw.title ?? file.basename, url: raw.url };
 	} catch {
@@ -43,7 +44,7 @@ export async function readWebSpec(core: VivariumCore, file: TFile): Promise<WebS
 
 class WebSurface {
 	readonly el: HTMLElement;
-	private wv: any; // Electron WebviewTag
+	private wv: WebviewElement;
 	private urlInput: HTMLInputElement;
 	private backBtn!: HTMLElement;
 	private fwdBtn!: HTMLElement;
@@ -65,9 +66,9 @@ class WebSurface {
 			b.addEventListener("click", (e) => (e.stopPropagation(), fn()));
 			return b;
 		};
-		this.backBtn = btn("arrow-left", "Back", () => this.wv.canGoBack() && this.wv.goBack());
-		this.fwdBtn = btn("arrow-right", "Forward", () => this.wv.canGoForward() && this.wv.goForward());
-		btn("rotate-cw", "Reload", () => this.wv.reload());
+		this.backBtn = btn("arrow-left", "Back", () => this.wv.canGoBack?.() && this.wv.goBack?.());
+		this.fwdBtn = btn("arrow-right", "Forward", () => this.wv.canGoForward?.() && this.wv.goForward?.());
+		btn("rotate-cw", "Reload", () => this.wv.reload?.());
 		this.urlInput = bar.createEl("input", { cls: "vivarium-web-url", attr: { type: "text", spellcheck: "false" } });
 		// where you last were (per device) — the file keeps the page the tile was made for
 		const startUrl = core.tileState<{ url: string }>(spec.id).url || spec.url;
@@ -77,7 +78,7 @@ class WebSurface {
 			e.stopPropagation(); // typing an address must not trigger canvas shortcuts
 			if (e.key === "Enter") {
 				const u = normalizeUrl(this.urlInput.value) ?? `https://duckduckgo.com/?q=${encodeURIComponent(this.urlInput.value)}`;
-				this.wv.loadURL(u);
+				void this.wv.loadURL?.(u);
 				this.wv.focus();
 				// typing an address is a deliberate change: that becomes the tile's page (saved to the file)
 				if (normalizeUrl(this.urlInput.value)) this.setHome(u);
@@ -87,25 +88,25 @@ class WebSurface {
 			}
 		});
 		this.urlInput.addEventListener("focus", () => this.urlInput.select());
-		btn("external-link", "Open in your browser", () => window.open(this.wv.getURL?.() ?? spec.url));
-		btn("maximize", "Full screen (Esc to leave)", () => this.el.requestFullscreen().catch(() => {}));
+		btn("external-link", "Open in your browser", () => void window.open(this.wv.getURL?.() ?? spec.url));
+		btn("maximize", "Full screen (Esc to leave)", () => void this.el.requestFullscreen().catch(() => {}));
 
-		const wv = (this.wv = document.createElement("webview") as any);
+		// Electron's <webview> (not in the DOM tag list, hence the cast)
+		const wv = (this.wv = this.el.createEl("webview" as keyof HTMLElementTagNameMap) as unknown as WebviewElement);
 		wv.setAttribute("partition", WEB_PARTITION);
 		wv.setAttribute("allowpopups", "");
 		wv.setAttribute("src", startUrl);
 		wv.addClass("vivarium-web-view");
-		this.el.appendChild(wv);
 		const nav = () => {
-			const u = wv.getURL();
-			if (document.activeElement !== this.urlInput) this.urlInput.value = u;
-			this.backBtn.toggleClass("is-disabled", !wv.canGoBack());
-			this.fwdBtn.toggleClass("is-disabled", !wv.canGoForward());
+			const u = wv.getURL?.() ?? "";
+			if (activeDocument.activeElement !== this.urlInput) this.urlInput.value = u;
+			this.backBtn.toggleClass("is-disabled", !wv.canGoBack?.());
+			this.fwdBtn.toggleClass("is-disabled", !wv.canGoForward?.());
 			this.persist(u, undefined);
 		};
 		wv.addEventListener("did-navigate", nav);
 		wv.addEventListener("did-navigate-in-page", nav);
-		wv.addEventListener("page-title-updated", (e: any) => this.persist(undefined, e.title));
+		wv.addEventListener("page-title-updated", (e) => this.persist(undefined, (e as PageTitleEvent).title));
 
 		// Off-screen or tiny: stop painting (the page keeps running, nothing reloads).
 		this.io = new IntersectionObserver((es) => {
@@ -184,7 +185,7 @@ export class WebEmbed extends Component {
 		// Keep the card attached when off-screen: a detached <webview> would reload its page.
 		const keep = () => {
 			for (const leaf of this.core.app.workspace.getLeavesOfType("canvas")) {
-				for (const n of (leaf.view as any).canvas?.nodes?.values() ?? []) {
+				for (const n of (leaf.view as unknown as CanvasView).canvas?.nodes?.values() ?? []) {
 					if (n.contentEl === this.ctx.containerEl) {
 						n.alwaysKeepLoaded = true;
 						return true;

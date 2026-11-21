@@ -114,6 +114,8 @@ export class TmuxHub {
 	vaultName = "";
 	/** Put first on every tile's PATH (where the vivarium CLI lives). */
 	pathPrefix = "";
+	/** The plugin's control socket, exposed as $VIVARIUM_SOCKET so the CLI in a tile talks to the right vault. */
+	controlSocket = "";
 	/**
 	 * Linux: start the tmux server in its own systemd user scope instead of inside Obsidian's
 	 * (the desktop puts each app in a scope, and stops it when you log out). With lingering
@@ -208,8 +210,8 @@ export class TmuxHub {
 		this.partial = null; // a half line from a client that died must not prefix the new one's output
 		this.exitReason = "";
 		// Only the current client's output counts (a dead one can still flush its pipe).
-		proc.stdout!.on("data", (chunk: Buffer) => this.proc === proc && this.onData(chunk));
-		proc.stderr!.on("data", (d) => {
+		proc.stdout.on("data", (chunk: Buffer) => this.proc === proc && this.onData(chunk));
+		proc.stderr.on("data", (d) => {
 			const msg = String(d).trim();
 			if (msg) this.exitReason = msg;
 			console.warn("[vivarium] tmux:", msg);
@@ -406,6 +408,7 @@ export class TmuxHub {
 	/** Recent output with colours, wrapped lines joined (so it reflows at any width). */
 	async captureForSnapshot(paneId: string, lines: number): Promise<string> {
 		const out = await this.cmd(`capture-pane -p -e -J -t ${tq(paneId)} -S ${-lines}`);
+		// eslint-disable-next-line no-control-regex -- strips terminal colour codes (ESC [ … m)
 		while (out.length && !out[out.length - 1].replace(/\x1b\[[0-9;]*m/g, "").trim()) out.pop();
 		return out.join("\n") + "\n";
 	}
@@ -443,7 +446,7 @@ export class TmuxHub {
 		// starts at its final size; then we pin it (window-size manual for that window only).
 		await this.cmd(`set-option -g default-size ${cols}x${rows}`).catch(() => {});
 		const lines = await this.cmd(
-			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} -e VIVARIUM_TMUX_SOCKET=${tq(this.socket)}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
+			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} -e VIVARIUM_TMUX_SOCKET=${tq(this.socket)}${this.controlSocket ? ` -e VIVARIUM_SOCKET=${tq(this.controlSocket)}` : ""}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
 		);
 		const [windowId, paneId] = (lines[0] ?? "").split(" ");
 		// Pin this window's size, so a terminal attaching to it (`vivarium attach`) doesn't resize it.

@@ -1,5 +1,4 @@
 node_modules/
-helper/macos/.build/
 .DS_Store
 # build output lands in the dev vault's plugin folder
 dev-vault/.obsidian/plugins/vivarium/*
@@ -10,3 +9,4 @@ dev-vault/Vivarium/
 dev-vault/Campus/
 dev-vault/Workspace.canvas
 .vault-path
+.claude/worktrees/

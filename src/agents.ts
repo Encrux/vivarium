@@ -1,6 +1,6 @@
 /**
- * Coding agents in tiles (Codex, Claude Code, anything that runs shell commands) can use the
- * `vivarium` CLI. Two things make that work without any setup:
+ * Agent integration (opt-in: Settings → Coding agents, or the one-time prompt). Coding agents in
+ * tiles (Codex, Claude Code, anything that runs shell commands) can then use the `vivarium` CLI:
  *
  *  1. The CLI is findable: a copy lives in ~/.vivarium/bin (with a launcher that falls back to
  *     Obsidian's own Node when `node` isn't installed). That folder goes first on each tile's
@@ -21,8 +21,11 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 // @ts-ignore: bundled as text by esbuild
-import SKILL from "../skill/SKILL.md";
+import SKILL_MD from "../skill/SKILL.md";
+// @ts-ignore: bundled as text by esbuild (see esbuild.config.mjs)
+import CLI from "../bin/vivarium";
 
+const SKILL = SKILL_MD as string;
 const MARKER = ".installed-by-vivarium";
 
 export const BIN_DIR = path.join(os.homedir(), ".vivarium", "bin");
@@ -45,18 +48,20 @@ function skillDirs(): string[] {
 function writeIfChanged(file: string, text: string, mode?: number): boolean {
 	try {
 		if (fs.readFileSync(file, "utf8") === text) return false;
-	} catch {}
+	} catch {
+			// best effort
+		}
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	fs.writeFileSync(file, text, mode ? { mode } : undefined);
 	if (mode) fs.chmodSync(file, mode);
 	return true;
 }
 
+const LOCAL_LINK = path.join(os.homedir(), ".local", "bin", "vivarium");
+
 /** Put the CLI where every tile finds it (its folder goes first on each tile's PATH). */
-export function installCli(pluginDir: string) {
-	const src = path.join(pluginDir, "vivarium");
-	if (!fs.existsSync(src)) return;
-	writeIfChanged(path.join(BIN_DIR, "vivarium.js"), fs.readFileSync(src, "utf8"));
+export function installCli() {
+	writeIfChanged(path.join(BIN_DIR, "vivarium.js"), CLI as string);
 	writeIfChanged(path.join(BIN_DIR, "SKILL.md"), SKILL); // for `vivarium setup` outside Obsidian
 	const q = (s: string) => "'" + s.replace(/'/g, `'\\''`) + "'";
 	writeIfChanged(
@@ -72,21 +77,44 @@ export function installCli(pluginDir: string) {
 		].join("\n"),
 		0o755,
 	);
-	const link = path.join(os.homedir(), ".local", "bin", "vivarium");
 	const target = path.join(BIN_DIR, "vivarium");
 	let current: string | null = null;
 	try {
-		current = fs.readlinkSync(link);
-	} catch {}
+		current = fs.readlinkSync(LOCAL_LINK);
+	} catch {
+			// best effort
+		}
 	if (current === target) return;
-	if (current === null && fs.existsSync(link)) return; // a real file of yours: leave it
+	if (current === null && fs.existsSync(LOCAL_LINK)) return; // a real file of yours: leave it
 	try {
-		fs.mkdirSync(path.dirname(link), { recursive: true });
-		if (current !== null) fs.unlinkSync(link); // an old or dangling vivarium link
-		fs.symlinkSync(target, link);
+		fs.mkdirSync(path.dirname(LOCAL_LINK), { recursive: true });
+		if (current !== null) fs.unlinkSync(LOCAL_LINK); // an old or dangling vivarium link
+		fs.symlinkSync(target, LOCAL_LINK);
 	} catch (e) {
 		console.warn("[vivarium] could not link the CLI into ~/.local/bin", e);
 	}
+}
+
+/** Remove the CLI and our ~/.local/bin link (never a file of yours with the same name). */
+export function removeCli() {
+	try {
+		if (fs.readlinkSync(LOCAL_LINK) === path.join(BIN_DIR, "vivarium")) fs.unlinkSync(LOCAL_LINK);
+	} catch {
+			// best effort
+		}
+	fs.rmSync(BIN_DIR, { recursive: true, force: true });
+}
+
+/** Turn the whole agent integration on or off: CLI, skill, and (if wanted) the Codex rule. */
+export function syncAgentIntegration(on: boolean, codexRules: boolean): string[] {
+	try {
+		if (on) installCli();
+		else removeCli();
+	} catch (e) {
+		console.warn("[vivarium] CLI", e);
+	}
+	syncCodexRules(on && codexRules);
+	return syncSkill(on);
 }
 
 /** Install (or remove) the skill. Returns the folders changed. */

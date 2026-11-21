@@ -14,34 +14,40 @@
  * per zoom-out, no per-frame work per card.
  */
 import { TFile } from "obsidian";
+import type { CanvasInternal, CanvasNode } from "./internal";
 
 const LABEL_CLASS = "vivarium-zoom-label";
 const OUT_CLASS = "vivarium-zoomed-out";
 const FAR_CLASS = "vivarium-zoomed-far";
 const VERY_FAR_CLASS = "vivarium-zoomed-veryfar";
 
-type AnyNode = any;
-type AnyCanvas = any;
+/** The parts of Canvas semantic zoom needs; hook() checks they exist. */
+type ZoomCanvas = CanvasInternal & Required<Pick<CanvasInternal, "wrapperEl" | "canvasEl" | "nodes" | "markViewportChanged">>;
+
+function zoomable(c: CanvasInternal): c is ZoomCanvas {
+	return typeof c.markViewportChanged === "function" && !!c.wrapperEl && !!c.canvasEl && !!c.nodes;
+}
 
 export interface ZoomListener {
 	(scale: number): void;
 }
 
 export class SemanticZoom {
-	private hooked = new Map<AnyCanvas, () => void>();
+	private hooked = new Map<CanvasInternal, () => void>();
 	private listeners = new Set<ZoomListener>();
 
-	constructor(private isTileNode: (n: AnyNode) => boolean, private labelForFile: (f: TFile) => string | null) {}
+	constructor(private isTileNode: (n: CanvasNode) => boolean, private labelForFile: (f: TFile) => string | null) {}
 
 	onZoom(fn: ZoomListener): () => void {
 		this.listeners.add(fn);
 		return () => this.listeners.delete(fn);
 	}
 
-	hook(canvas: AnyCanvas) {
-		if (this.hooked.has(canvas) || typeof canvas.markViewportChanged !== "function") return;
+	hook(canvas: CanvasInternal) {
+		if (this.hooked.has(canvas) || !zoomable(canvas)) return;
 		const orig = canvas.markViewportChanged;
 		let raf: number | null = null;
+		// eslint-disable-next-line @typescript-eslint/no-this-alias -- the wrapped method needs its own `this` (the canvas)
 		const self = this;
 		// Instance-level wrap (not the prototype): Canvas calls this whenever pan/zoom changes.
 		// Canvas eases zoom/pan towards a target (tZoom) over several frames after one wheel event,
@@ -50,12 +56,12 @@ export class SemanticZoom {
 		const tick = () => {
 			raf = null;
 			self.update(canvas);
-			const moving = typeof canvas.tZoom === "number" && Math.abs(canvas.zoom - canvas.tZoom) > 0.002;
-			if (moving) raf = requestAnimationFrame(tick);
+			const moving = typeof canvas.tZoom === "number" && typeof canvas.zoom === "number" && Math.abs(canvas.zoom - canvas.tZoom) > 0.002;
+			if (moving) raf = window.requestAnimationFrame(tick);
 		};
-		canvas.markViewportChanged = function (...args: any[]) {
+		canvas.markViewportChanged = function (this: CanvasInternal, ...args: unknown[]) {
 			const r = orig.apply(this, args);
-			if (raf === null) raf = requestAnimationFrame(tick);
+			if (raf === null) raf = window.requestAnimationFrame(tick);
 			return r;
 		};
 		this.hooked.set(canvas, () => {
@@ -68,7 +74,7 @@ export class SemanticZoom {
 			for (const n of canvas.nodes?.values() ?? []) {
 				n.vivariumLabelEl?.remove();
 				n.vivariumLabelEl = null;
-				(n.containerEl as HTMLElement | undefined)?.removeClass("vivarium-has-label");
+				n.containerEl?.removeClass("vivarium-has-label");
 				if (n.vivariumOrigUpdateBreakpoint) {
 					n.updateBreakpoint = n.vivariumOrigUpdateBreakpoint;
 					n.vivariumOrigUpdateBreakpoint = null;
@@ -78,21 +84,21 @@ export class SemanticZoom {
 		this.update(canvas);
 	}
 
-	private lastOut = new WeakMap<AnyCanvas, boolean>();
-	private lastInv = new WeakMap<AnyCanvas, number>();
-	private lastFar = new WeakMap<AnyCanvas, boolean>();
-	private lastVeryFar = new WeakMap<AnyCanvas, boolean>();
-	private overlays = new WeakMap<AnyCanvas, { layer: HTMLElement; byNode: Map<AnyNode, { el: HTMLElement; key: string }> }>();
+	private lastOut = new WeakMap<CanvasInternal, boolean>();
+	private lastInv = new WeakMap<CanvasInternal, number>();
+	private lastFar = new WeakMap<CanvasInternal, boolean>();
+	private lastVeryFar = new WeakMap<CanvasInternal, boolean>();
+	private overlays = new WeakMap<CanvasInternal, { layer: HTMLElement; byNode: Map<CanvasNode, { el: HTMLElement; key: string }> }>();
 
 	/** One small element per group, in a layer above all cards (few groups → cheap to sync). */
-	private syncGroupOverlays(canvas: AnyCanvas) {
+	private syncGroupOverlays(canvas: ZoomCanvas) {
 		let o = this.overlays.get(canvas);
 		if (!o) {
 			o = { layer: canvas.canvasEl.createDiv({ cls: "vivarium-group-overlays" }), byNode: new Map() };
 			this.overlays.set(canvas, o);
 		}
 		if (o.layer.parentElement !== canvas.canvasEl || o.layer !== canvas.canvasEl.lastElementChild) canvas.canvasEl.appendChild(o.layer);
-		const seen = new Set<AnyNode>();
+		const seen = new Set<CanvasNode>();
 		for (const n of canvas.nodes.values()) {
 			if (typeof n.label !== "string" || !n.label || n.getData?.().type !== "group") continue;
 			seen.add(n);
@@ -111,13 +117,17 @@ export class SemanticZoom {
 			e.el.style.height = `${n.height}px`;
 			(e.el.firstChild as HTMLElement).textContent = n.label;
 		}
-		for (const [n, e] of o.byNode) if (!seen.has(n)) (e.el.remove(), o.byNode.delete(n));
+		for (const [n, e] of o.byNode) {
+			if (seen.has(n)) continue;
+			e.el.remove();
+			o.byNode.delete(n);
+		}
 	}
-	private settle = new WeakMap<AnyCanvas, number>();
+	private settle = new WeakMap<CanvasInternal, number>();
 
-	private update(canvas: AnyCanvas) {
-		const scale: number = canvas.scale || 1;
-		const out = canvas.zoom <= canvas.zoomBreakpoint;
+	private update(canvas: ZoomCanvas) {
+		const scale = canvas.scale || 1;
+		const out = typeof canvas.zoom === "number" && typeof canvas.zoomBreakpoint === "number" && canvas.zoom <= canvas.zoomBreakpoint;
 		// Quantize so labels only relayout when their size changes noticeably (25% steps).
 		const STEP = 1.25;
 		const inv = Math.pow(STEP, Math.round(Math.log(1 / scale) / Math.log(STEP)));
@@ -158,34 +168,34 @@ export class SemanticZoom {
 		for (const l of this.listeners) l(scale);
 	}
 
-	private widthCache = new WeakMap<AnyCanvas, { n: number; w: number }>();
+	private widthCache = new WeakMap<CanvasInternal, { n: number; w: number }>();
 	/** 30th-percentile card width (recomputed only when the card count changes). */
-	private typicalWidth(canvas: AnyCanvas): number {
+	private typicalWidth(canvas: CanvasInternal): number {
 		const size = canvas.nodes?.size ?? 0;
 		const c = this.widthCache.get(canvas);
 		if (c && c.n === size) return c.w;
-		const ws = [...(canvas.nodes?.values() ?? [])].filter((n: AnyNode) => typeof n.text === "string" || n.file).map((n: AnyNode) => n.width).sort((a, b) => a - b);
+		const ws = [...(canvas.nodes?.values() ?? [])].filter((n) => typeof n.text === "string" || n.file).map((n) => n.width).sort((a, b) => a - b);
 		const w = ws.length ? ws[Math.floor(ws.length * 0.3)] : 300;
 		this.widthCache.set(canvas, { n: size, w });
 		return w;
 	}
 
 	/** node → the text its label was made from. Per plugin instance, so a reload starts fresh. */
-	private prepared = new WeakMap<AnyNode, string>();
+	private prepared = new WeakMap<CanvasNode, string>();
 
-	private source(n: AnyNode): string {
+	private source(n: CanvasNode): string {
 		return typeof n.text === "string" ? n.text : n.file?.path ?? n.url ?? "";
 	}
 
 	/** Make/refresh a card's zoomed-out label (only for cards that are new or changed). */
-	private prepare(n: AnyNode) {
+	private prepare(n: CanvasNode) {
 		this.prepared.set(n, this.source(n));
 		if (this.isTileNode(n)) {
 			// Keep Vivarium tiles mounted at every zoom: they show their last picture; the tiles
 			// themselves stop streaming/rendering while tiny (see zoom listeners).
 			if (!n.vivariumOrigUpdateBreakpoint) {
 				n.vivariumOrigUpdateBreakpoint = n.updateBreakpoint;
-				n.updateBreakpoint = function () {
+				n.updateBreakpoint = function (this: CanvasNode) {
 					this.mountContent?.();
 				};
 				n.mountContent?.();
@@ -196,12 +206,12 @@ export class SemanticZoom {
 		if (!label) {
 			n.vivariumLabelEl?.remove();
 			n.vivariumLabelEl = null;
-			(n.containerEl as HTMLElement | undefined)?.removeClass("vivarium-has-label");
+			n.containerEl?.removeClass("vivarium-has-label");
 			return;
 		}
-		const host: HTMLElement | undefined = n.containerEl ?? n.nodeEl;
+		const host = n.containerEl ?? n.nodeEl;
 		if (!host) return;
-		let el: HTMLElement = n.vivariumLabelEl;
+		let el = n.vivariumLabelEl;
 		if (!el || el.parentElement !== host) {
 			el?.remove();
 			el = n.vivariumLabelEl = host.createDiv({ cls: LABEL_CLASS });
@@ -211,7 +221,7 @@ export class SemanticZoom {
 		el.dataset.level = String(label.level);
 	}
 
-	private labelFor(n: AnyNode): { text: string; level: number } | null {
+	private labelFor(n: CanvasNode): { text: string; level: number } | null {
 		if (typeof n.text === "string") return headline(n.text);
 		if (n.file instanceof TFile) {
 			const t = this.labelForFile(n.file) ?? n.file.basename;
@@ -250,7 +260,7 @@ export function headline(md: string): { text: string; level: number } | null {
 function clean(s: string): string {
 	return s
 		.replace(/!\[\[[^\]]*\]\]/g, "")
-		.replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (_, a, b) => b || a)
+		.replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (_: string, a: string, b: string) => b || a)
 		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
 		.replace(/[*_`~=]+/g, "")
 		.replace(/^[-+>]\s+/, "")

@@ -17,6 +17,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import type { VivariumCore } from "./core";
 import type { PaneInfo } from "./tmux";
 import type { Launch } from "./core";
+import type { ElectronModule, XtermInternal } from "./internal";
 
 const HIDDEN_BUFFER_CAP = 256 * 1024;
 const HIDE_GRACE_MS = 150;
@@ -377,7 +378,7 @@ export class TerminalSurface {
 	 * unscaled cell sizes, so selection/clicks drift when zoomed. Un-scale the coordinates.
 	 */
 	private patchMouseForCssScale() {
-		const ms = (this.term as any)._core?._mouseService;
+		const ms = (this.term as unknown as XtermInternal)._core?._mouseService;
 		if (!ms || typeof ms.getCoords !== "function") return;
 		const unscale = (ev: { clientX: number; clientY: number }, element: HTMLElement) => {
 			const rect = element.getBoundingClientRect();
@@ -387,9 +388,9 @@ export class TerminalSurface {
 			return { clientX: rect.left + (ev.clientX - rect.left) / sx, clientY: rect.top + (ev.clientY - rect.top) / sy };
 		};
 		const getCoords = ms.getCoords.bind(ms);
-		ms.getCoords = (ev: any, el: HTMLElement, ...rest: any[]) => getCoords(unscale(ev, el), el, ...rest);
+		ms.getCoords = (ev: { clientX: number; clientY: number }, el: HTMLElement, ...rest: unknown[]) => getCoords(unscale(ev, el), el, ...rest);
 		const report = ms.getMouseReportCoords?.bind(ms);
-		if (report) ms.getMouseReportCoords = (ev: any, el: HTMLElement) => report(unscale(ev, el), el);
+		if (report) ms.getMouseReportCoords = (ev: { clientX: number; clientY: number }, el: HTMLElement) => report(unscale(ev, el), el);
 	}
 
 	/**
@@ -421,7 +422,7 @@ export class TerminalSurface {
 			scope.register(null, null, (e) => {
 				// Canvas can drop a focused terminal from the page (zoomed out, scrolled away) without
 				// a focusout: if focus isn't ours any more, step aside instead of holding the keys.
-				if (!this.el.isConnected || !this.el.contains(document.activeElement)) {
+				if (!this.el.isConnected || !this.el.contains(activeDocument.activeElement)) {
 					this.takeKeys(false);
 					return undefined;
 				}
@@ -468,7 +469,7 @@ export class TerminalSurface {
 		this.el.addEventListener("pointerdown", stop);
 		// Only when focused do we own the wheel; otherwise the content blocker lets the canvas pan.
 		this.el.addEventListener("wheel", (e) => {
-			if (this.el.contains(document.activeElement)) e.stopPropagation();
+			if (this.el.contains(activeDocument.activeElement)) e.stopPropagation();
 		}, { passive: true });
 	}
 
@@ -497,7 +498,7 @@ export class TerminalSurface {
 			const b = o.createEl("button", { text: label, cls: "mod-cta" });
 			b.addEventListener("click", (e) => {
 				e.stopPropagation();
-				this.restart();
+				void this.restart();
 			});
 		}
 	}
@@ -514,7 +515,7 @@ export class TerminalSurface {
 			e.stopPropagation();
 			c.grant();
 			this.hideOverlay();
-			this.start();
+			void this.start();
 		});
 	}
 
@@ -561,7 +562,8 @@ function openLink(uri: string) {
 	try {
 		// Obsidian's renderer has Node/Electron: shell.openExternal hands the URL to the system
 		// (xdg-open on Linux, Launch Services on macOS) → your default browser.
-		const { shell } = (window as any).require("electron");
+		// (no window.require → throws → the fallback below)
+		const { shell } = (window as unknown as { require: (m: "electron") => ElectronModule }).require("electron");
 		shell.openExternal(uri).catch(() => window.open(uri));
 	} catch {
 		window.open(uri);

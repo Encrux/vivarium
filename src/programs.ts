@@ -1,16 +1,10 @@
 import { App, Modal, Setting, SuggestModal } from "obsidian";
 import type { Program } from "./core";
-import type { AppInfo, WindowInfo } from "./helper";
 import { normalizeUrl } from "./web";
 
 const CUSTOM = Symbol("custom");
-export type Choice =
-	| Program
-	| typeof CUSTOM
-	| { kind: "window"; win: WindowInfo }
-	| { kind: "app"; app: AppInfo }
-	| { kind: "web"; url: string };
-export type Picked = { kind: "program"; program: Program } | { kind: "window"; win: WindowInfo } | { kind: "app"; app: AppInfo } | { kind: "web"; url: string };
+export type Choice = Program | typeof CUSTOM | { kind: "web"; url: string };
+export type Picked = { kind: "program"; program: Program } | { kind: "web"; url: string };
 const isProgram = (c: Choice): c is Program => typeof c === "object" && !("kind" in c);
 
 /** "Add program…" picker: fuzzy-filter presets, Enter adds. Last entry runs any command. */
@@ -19,8 +13,6 @@ export class ProgramPicker extends SuggestModal<Choice> {
 		app: App,
 		private programs: Program[],
 		private onPickAny: (p: Picked) => void,
-		private windows: WindowInfo[] = [],
-		private apps: AppInfo[] = [],
 	) {
 		super(app);
 		this.setPlaceholder("Add program to canvas…");
@@ -34,13 +26,10 @@ export class ProgramPicker extends SuggestModal<Choice> {
 		const q = query.toLowerCase().trim();
 		const m = (...xs: string[]) => !q || xs.some((x) => x.toLowerCase().includes(q));
 		const progs = this.programs.filter((p) => m(p.name, p.command));
-		const wins = this.windows.filter((w) => m(w.app, w.title)).map((win) => ({ kind: "window" as const, win }));
-		// apps: only when searching (the full list is long); running windows first
-		const apps = q ? this.apps.filter((a) => m(a.name)).slice(0, 30).map((app) => ({ kind: "app" as const, app })) : [];
 		// a URL or "localhost:3000" → a web page right on the canvas (first: it's what you typed)
 		const url = normalizeUrl(query);
 		const web = url ? [{ kind: "web" as const, url }] : !q || "web page browser".includes(q) ? [{ kind: "web" as const, url: "" }] : [];
-		return [...web, ...progs, ...wins, ...apps, CUSTOM];
+		return [...web, ...progs, CUSTOM];
 	}
 
 	renderSuggestion(c: Choice, el: HTMLElement) {
@@ -51,16 +40,8 @@ export class ProgramPicker extends SuggestModal<Choice> {
 			return;
 		}
 		if (!isProgram(c)) {
-			if (c.kind === "web") {
-				el.createDiv({ text: c.url ? `Open ${c.url}` : "Web page…" });
-				el.createEl("small", { text: "Browser right on the canvas · type a URL to open it directly", cls: "vivarium-suggest-sub" });
-			} else if (c.kind === "window") {
-				el.createDiv({ text: `${c.win.app} — ${c.win.title || "window"}` });
-				el.createEl("small", { text: "Open window · live tile", cls: "vivarium-suggest-sub" });
-			} else {
-				el.createDiv({ text: c.app.name });
-				el.createEl("small", { text: "App · opens a new window as a tile", cls: "vivarium-suggest-sub" });
-			}
+			el.createDiv({ text: c.url ? `Open ${c.url}` : "Web page…" });
+			el.createEl("small", { text: "Browser right on the canvas · type a URL to open it directly", cls: "vivarium-suggest-sub" });
 			return;
 		}
 		el.createDiv({ text: c.name });

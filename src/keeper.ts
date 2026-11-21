@@ -56,9 +56,9 @@ export class SessionKeeper {
 	constructor(private core: VivariumCore) {}
 
 	start() {
-		window.setTimeout(() => this.tick(), 3000);
-		this.tickTimer = window.setInterval(() => this.tick(), TICK_MS);
-		this.snapTimer = window.setInterval(() => this.snapshot(), SNAPSHOT_MS);
+		window.setTimeout(() => void this.tick(), 3000);
+		this.tickTimer = window.setInterval(() => void this.tick(), TICK_MS);
+		this.snapTimer = window.setInterval(() => void this.snapshot(), SNAPSHOT_MS);
 	}
 
 	stop() {
@@ -114,7 +114,7 @@ export class SessionKeeper {
 	/** Save recent output of tiles whose screen changed since the last snapshot. */
 	async snapshot() {
 		const hub = this.core.hub;
-		if (!hub.connected || !hub.allPanes().length) return;
+		if (!this.core.settings.snapshots || !hub.connected || !hub.allPanes().length) return;
 		try {
 			const rows = await hub.listPaneInfo();
 			for (const r of rows) {
@@ -132,13 +132,25 @@ export class SessionKeeper {
 		}
 	}
 
+	/** Delete this vault's saved terminal output (when snapshots are turned off). */
+	deleteSnapshots() {
+		this.lastSnap.clear();
+		try {
+			fs.rmSync(path.dirname(this.snapPath("x")), { recursive: true, force: true });
+		} catch {
+			// best effort
+		}
+	}
+
 	/** Forget a tile you stopped on purpose: it must not come back after a restart. */
 	forget(tileId: string) {
 		this.core.setTileState(tileId, { running: false, fg: undefined, agent: undefined, agentAt: undefined, agentPid: undefined, diedAt: undefined });
 		this.lastSnap.delete(tileId);
 		try {
 			fs.unlinkSync(this.snapPath(tileId));
-		} catch {}
+		} catch {
+			// best effort
+		}
 	}
 
 	/**
@@ -314,9 +326,11 @@ async function findAgent(rootPid: number, tree: Tree): Promise<Found | null> {
 		const pid = stack.pop()!;
 		if (pid !== rootPid) {
 			try {
-				const d = JSON.parse(fs.readFileSync(path.join(dir, `${pid}.json`), "utf8"));
-				if (typeof d.sessionId === "string") return { kind: "claude", sessionId: d.sessionId, pid };
-			} catch {}
+				const d = JSON.parse(fs.readFileSync(path.join(dir, `${pid}.json`), "utf8")) as { sessionId?: unknown } | null;
+				if (typeof d?.sessionId === "string") return { kind: "claude", sessionId: d.sessionId, pid };
+			} catch {
+			// best effort
+		}
 			if (path.basename(tree.get(pid)?.comm ?? "") === "codex") codex.push(pid);
 		}
 		stack.push(...(children.get(pid) ?? []));

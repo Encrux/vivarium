@@ -1,0 +1,30 @@
+# Push a tag that matches manifest.json's version (e.g. `git tag 0.1.0 && git push origin 0.1.0`):
+# this builds the plugin and creates a draft GitHub release with the three files Obsidian
+# installs. Check the draft, then publish it.
+name: Release
+on:
+  push:
+    tags: ["*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Tag must match manifest.json
+        run: test "$(node -p "require('./manifest.json').version")" = "$GITHUB_REF_NAME"
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=dev-vault/.obsidian/plugins/vivarium
+          gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" --generate-notes \
+            "$out/main.js" "$out/manifest.json" "$out/styles.css"

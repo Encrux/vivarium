@@ -50,37 +50,6 @@
 	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
 }
 
-/* ---- app tiles (streamed native windows) ---- */
-.vivarium-window { position: relative; width: 100%; height: 100%; background: var(--background-secondary); contain: strict; overflow: hidden; }
-.vivarium-window-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
-.vivarium-window-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; pointer-events: none; }
-.vivarium-window-status {
-	position: absolute; inset: 0; display: flex; gap: 10px; align-items: center; justify-content: center;
-	color: var(--text-muted); font-size: var(--font-ui-small); background: var(--background-secondary);
-}
-.vivarium-window-toolbar {
-	position: absolute; top: 6px; right: 6px; z-index: 5; display: flex; gap: 2px; padding: 2px;
-	border-radius: var(--radius-m); background: color-mix(in srgb, var(--background-primary) 85%, transparent);
-	opacity: 0; transition: opacity 120ms;
-}
-.canvas-node.is-focused .vivarium-window-toolbar, .vivarium-view .vivarium-window:hover .vivarium-window-toolbar { opacity: 1; }
-.vivarium-window.is-handed-off::after {
-	content: "Open in full screen — press ⌃⌘F there to bring it back";
-	position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-	background: color-mix(in srgb, var(--background-primary) 70%, transparent); color: var(--text-muted); font-size: var(--font-ui-small);
-}
-.vivarium-window-banner {
-	position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 6; display: flex; gap: 8px; align-items: center;
-	padding: 4px 6px 4px 10px; border-radius: var(--radius-m); font-size: var(--font-ui-smaller); color: var(--text-muted);
-	background: color-mix(in srgb, var(--background-primary) 90%, transparent); border: 1px solid var(--background-modifier-border);
-}
-.vivarium-window-banner span { flex: 1; }
-.vivarium-window.is-resizing .vivarium-window-canvas { object-fit: fill; }
-/* Linux: the picture is the window itself, always the tile's size (stretched only while resizing) */
-.vivarium-window.is-linux .vivarium-window-canvas { object-fit: fill; outline: none; }
-/* while the real window covers the tile, hide our chrome under it */
-.vivarium-window.is-engaged .vivarium-window-toolbar { display: none; }
-
 /* ---- semantic zoom: labels that stay readable when zoomed out (see zoom.ts) ---- */
 .vivarium-zoom-label { display: none; }
 .vivarium-zoomed-out .vivarium-zoom-label {
@@ -134,3 +103,5 @@
 /* off-screen or tiny: don't paint the page (it keeps running) */
 .vivarium-web.is-dormant .vivarium-web-view { visibility: hidden; }
 .vivarium-web:fullscreen { width: 100vw; height: 100vh; }
+.vivarium-drag-ghost.is-hidden { display: none; }
+.vivarium-rename-input { width: 100%; }

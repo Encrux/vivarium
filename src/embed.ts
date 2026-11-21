@@ -26,7 +26,7 @@ async function mount(core: VivariumCore, parent: HTMLElement, file: TFile): Prom
 			cwd: start.cwd,
 		},
 	});
-	surface.start();
+	void surface.start();
 	return surface;
 }
 

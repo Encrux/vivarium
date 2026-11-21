@@ -19,7 +19,6 @@ They keep running when you close the canvas or quit Obsidian.
 
 - Terminal tiles run any command (`zsh`, `claude`, `codex`, `npm run dev`, `htop`) in a real terminal.
 - Web tiles show a page, like the app your dev server is serving.
-- App tiles show another program's window (experimental).
 - After a reboot or crash, tiles start again where they were. Claude Code and Codex tiles resume
   their own conversation.
 - Coding agents in a tile can open tiles next to themselves, fork their conversation into a new
@@ -33,8 +32,9 @@ They keep running when you close the canvas or quit Obsidian.
 
 ## Install
 
-You need Obsidian 1.5+ (desktop), Node 20+ and tmux (`brew install tmux` or `sudo apt install tmux`).
-Vivarium isn't in the community plugin directory yet, so you build it from source:
+You need Obsidian 1.8.7+ on macOS or Linux, and tmux (`brew install tmux` or `sudo apt install tmux`).
+
+Vivarium isn't in the community plugin directory yet. To build it from source (needs Node 20+):
 
 ```sh
 git clone https://github.com/Encrux/vivarium.git && cd vivarium
@@ -44,28 +44,22 @@ sh scripts/update.sh ~/path/to/your/vault
 Then turn on Vivarium in Settings → Community plugins. To update, run `sh scripts/update.sh` again
 and turn the plugin off and on.
 
-App tiles need a small helper program:
-
-- macOS 14+: run `npm run build:helper` before `update.sh` (needs the Xcode Command Line Tools),
-  and allow Obsidian under Screen Recording and Accessibility in System Settings.
-- Linux (Wayland): `sudo apt install cargo pkg-config libxkbcommon-dev libgbm-dev`, then `update.sh`
-  builds it.
-
 ## Usage
 
 Right-click an empty spot on a canvas and choose **Add program…**, or use the `>_` button in the
-canvas toolbar. Type a command, a URL or an app name.
+canvas toolbar. Type a command or a web address.
 
 - Click a tile to select it, click again to type into it.
 - Double-click a tile's name to rename it.
 - Each tile is a small file in `Vivarium/`. Delete the file to stop the program.
 - In a terminal every key goes to the program, except Obsidian's shortcuts (Cmd on macOS,
   Ctrl+Shift on Linux).
+- Programs keep running when you close Obsidian. **Stop all programs** in the command palette ends them.
 
 ### Agents
 
-Agents running in a tile get a `vivarium` command and a skill that explains it. There's nothing to
-set up.
+Turn on **Let coding agents use the canvas** (Vivarium asks once, or in Settings). Agents running in
+a tile then get a `vivarium` command and a skill that explains it:
 
 ```sh
 vivarium add -- npm run dev          # start a program in a new tile next to mine
@@ -84,32 +78,48 @@ command, not the running program, and a tile that arrives through a pull or sync
 until you press its Start button. Don't put secrets into commands or URLs, since those are saved in
 the tile files.
 
+## What Vivarium does outside your vault
+
+Obsidian asks plugins to list this. Vivarium needs it because programs run outside Obsidian, in
+tmux.
+
+| What | Where | When |
+|---|---|---|
+| Runs your tiles' commands in tmux | tmux server `-L vivarium` (keeps running after you quit Obsidian) | always |
+| Remembers which program and conversation each tile runs, for restoring after a restart. Every 10 seconds it lists your processes (`ps`), reads Claude Code's session files (`~/.claude/sessions`) and which files Codex has open | Obsidian's local storage, per device | always |
+| Saves recent terminal output | `~/.vivarium/snapshots` (readable only by you) | setting, on by default |
+| Local socket for the `vivarium` command | `~/.vivarium/<vault>-<id>.sock` (only you can connect) | always |
+| The `vivarium` command | `~/.vivarium/bin`, linked from `~/.local/bin` | only with the agent setting |
+| Agent skill | `~/.agents/skills/vivarium`, `~/.claude/skills/vivarium` | only with the agent setting |
+| Codex rule (fewer prompts) | `~/.codex/rules/vivarium.rules` | only with that setting |
+| tmux in its own systemd scope (Linux) | your user's systemd | setting, off by default |
+
+**Network:** Vivarium itself contacts no servers and has no telemetry. Web tiles load the pages you
+open in them; text typed into a web tile's address bar that isn't an address is searched on
+DuckDuckGo.
+
+To undo all of it: run **Remove files installed outside the vault** and **Stop all programs** from
+the command palette, then uninstall the plugin.
+
 ## Platforms
 
 | Platform | Support |
 |---|---|
-| macOS 14+ | Supported* |
-| Linux (Wayland) | Supported, tested on Ubuntu 26.04 |
+| macOS | Supported* |
+| Linux | Supported, tested on Ubuntu 26.04 |
 | Windows | Not supported, no tmux ([#3](https://github.com/Encrux/vivarium/issues/3)) |
 | Obsidian mobile | Not supported |
 
-Where macOS and Linux differ:
-
-| | macOS | Linux |
-|---|---|---|
-| App tiles | 🟡 | 🟡 |
-| GPU-rendered apps in app tiles | 🟢 | 🟡 |
-| Windows that are already open, in app tiles | 🟡 | 🔴 [#4](https://github.com/Encrux/vivarium/issues/4) |
-| Web tiles | 🟢 | 🟡 |
-| Programs keep running through a logout | 🔴 | 🟡 |
-
-🟢 works · 🟡 experimental · 🔴 not available
+On Linux, web tiles are less tested than on macOS, and programs can keep running through a logout
+(setting, plus `loginctl enable-linger`).
 
 ## Roadmap
 
 Ideas, not scheduled. Comments welcome on the issues.
 
-- [ ] Show already-open windows in app tiles on Linux, e.g. your normal Firefox ([#4](https://github.com/Encrux/vivarium/issues/4))
+- [ ] App tiles: other programs' windows on the canvas. Built and working on the
+  [`app-tiles`](https://github.com/Encrux/vivarium/tree/app-tiles) branch, left out of the plugin
+  because they need native helper programs and screen-recording permissions
 - [ ] Several people working on one canvas ([#1](https://github.com/Encrux/vivarium/issues/1))
 - [ ] Continue a tile on another machine ([#2](https://github.com/Encrux/vivarium/issues/2))
 - [ ] Windows support ([#3](https://github.com/Encrux/vivarium/issues/3))
@@ -117,6 +127,8 @@ Ideas, not scheduled. Comments welcome on the issues.
 ## More
 
 - [How it works](docs/how-it-works.md): architecture, performance, crash recovery, git details, caveats
-- [Contributing](CONTRIBUTING.md): building, testing, the helpers
+- [Contributing](CONTRIBUTING.md): building, testing, releasing
+
+Vivarium is MIT licensed and includes [xterm.js](https://xtermjs.org) (MIT).
 
 <sub>*Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>. If you're using MacOS, your experience will be much better using Campus</sub>

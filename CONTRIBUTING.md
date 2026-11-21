@@ -6,39 +6,36 @@ Issues and suggestions are welcome. This is a personal project, so replies may t
 
 ```sh
 npm install
-npm run dev                  # rebuild on change into dev-vault/
-npm run build                # typecheck + build once
-npm run build:helper         # macOS app-tile helper (Swift)
-npm run build:helper-linux   # Linux app-tile helper (Rust)
+npm run dev     # rebuild on change into dev-vault/
+npm run build   # typecheck + build once
+npm run lint    # Obsidian's lint rules (the community directory checks the same)
 ```
 
 Open `dev-vault/` as a vault, or install into another one with `sh scripts/update.sh <vault>`.
-Turn the plugin off and on to reload it. `update.sh` remembers the vault, and on Linux it builds
-the Rust helper when cargo is installed.
+Turn the plugin off and on to reload it. `update.sh` remembers the vault.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `src/` | the plugin (TypeScript) |
-| `bin/vivarium` | the CLI that tiles and agents use |
+| `bin/vivarium` | the CLI that tiles and agents use (bundled into `main.js`, installed by the agent setting) |
 | `skill/SKILL.md` | the agent skill the plugin installs |
-| `helper/macos/` | app-tile helper for macOS (Swift) |
-| `helper/linux/` | app-tile helper for Linux (Rust, Smithay) |
-| `scripts/` | install/update, demo recording, crash reports |
+| `scripts/` | install/update, version bump, demo recording, crash reports |
 
-Both helpers speak the same protocol with the plugin, see
-`helper/macos/Sources/VivariumHelper/Protocol.swift` and `helper/linux/README.md`.
+App tiles (other programs' windows, with native helpers for macOS and Linux) live on the
+[`app-tiles`](https://github.com/Encrux/vivarium/tree/app-tiles) branch.
 
-## Testing the Linux helper
-
-Runs in Docker, so it works on macOS too:
+## Releasing
 
 ```sh
-helper/linux/scripts/docker-test.sh   # build, unit tests, app harness (latency, CPU)
-helper/linux/scripts/test-daemon.sh   # daemon: reconnects, cleanup
-helper/linux/scripts/test-e2e.sh      # a real Linux Obsidian with the plugin and a helper app
+npm version patch   # or minor / major: updates package.json, manifest.json, versions.json and tags
+git push && git push --tags
 ```
+
+The tag starts the Release workflow, which builds the plugin and creates a draft GitHub release
+with `main.js`, `manifest.json` and `styles.css`. Check it and publish it. Obsidian's community
+directory picks up new releases from there.
 
 ## Other tools
 

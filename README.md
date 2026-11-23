@@ -11,8 +11,7 @@ Live programs on your Obsidian Canvas.
 Vivarium puts terminals, coding agents, dev servers and web pages on a canvas, next to your notes.
 They keep running when you close the canvas or quit Obsidian.
 
-> [!NOTE]
-> This project was built for personal use. The highest priority was a working prototype, quickly,
+> **Note:** This project was built for personal use. The highest priority was a working prototype, quickly,
 > so AI was used extensively. If that makes you uncomfortable, please don't use it.
 
 ## Features

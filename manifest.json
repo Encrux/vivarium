@@ -1,7 +1,7 @@
 {
   "id": "vivarium",
   "name": "Vivarium",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.8.7",
   "description": "Run terminals, coding agents and dev servers as live tiles on your canvas. They keep running in tmux after you quit.",
   "author": "Daniel Bösch",

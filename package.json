@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vivarium",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live program tiles (terminals, agents, dev servers) for Obsidian Canvas, backed by tmux.",
   "main": "main.js",
   "scripts": {

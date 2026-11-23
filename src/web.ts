@@ -7,7 +7,7 @@
  * detached <webview> reloads), but stop painting while off-screen or tiny.
  */
 import { Component, FileView, TFile, WorkspaceLeaf, setIcon } from "obsidian";
-import type { VivariumCore } from "./core";
+import { TILE_ID, type VivariumCore } from "./core";
 import type { CanvasView, PageTitleEvent, WebviewElement } from "./internal";
 
 export const WEB_EXT = "web";
@@ -23,6 +23,9 @@ export interface WebSpec {
 }
 
 /** Turn what you typed into a URL: "localhost:3000" → http://…, "example.com" → https://… */
+/** Pages a web tile may show (from its file, or opened in your browser): no javascript:, data: or app links. */
+const WEB_SCHEME = /^(https?|file):/i;
+
 export function normalizeUrl(q: string): string | null {
 	const s = q.trim();
 	if (!s || /\s/.test(s)) return null;
@@ -35,7 +38,7 @@ export function normalizeUrl(q: string): string | null {
 export async function readWebSpec(core: VivariumCore, file: TFile): Promise<WebSpec | null> {
 	try {
 		const raw = JSON.parse(await core.app.vault.cachedRead(file)) as Partial<WebSpec> | null;
-		if (!raw?.id || typeof raw.url !== "string") return null;
+		if (typeof raw?.id !== "string" || !TILE_ID.test(raw.id) || typeof raw.url !== "string" || !WEB_SCHEME.test(raw.url)) return null;
 		return { version: 1, kind: "web", id: raw.id, title: raw.title ?? file.basename, url: raw.url };
 	} catch {
 		return null;
@@ -88,7 +91,10 @@ class WebSurface {
 			}
 		});
 		this.urlInput.addEventListener("focus", () => this.urlInput.select());
-		btn("external-link", "Open in your browser", () => void window.open(this.wv.getURL?.() ?? spec.url));
+		btn("external-link", "Open in your browser", () => {
+			const u = this.wv.getURL?.() ?? spec.url;
+			if (/^https?:/i.test(u)) window.open(u);
+		});
 		btn("maximize", "Full screen (Esc to leave)", () => void this.el.requestFullscreen().catch(() => {}));
 
 		// Electron's <webview> (not in the DOM tag list, hence the cast)

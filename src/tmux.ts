@@ -60,6 +60,11 @@ export function tq(s: string): string {
 	return '"' + s.replace(/[\\"$]/g, (m) => "\\" + m) + '"';
 }
 
+/** tq for arguments tmux expands as formats (new-window -n and -c): `#(cmd)` there would run cmd. */
+export function tqLiteral(s: string): string {
+	return tq(s.replace(/#/g, "##"));
+}
+
 /** Decode tmux's octal escaping (`\ooo` for bytes < 0x20 and backslash). Input is raw bytes. */
 function decodeOctal(buf: Uint8Array, start: number, end: number): Uint8Array {
 	const out = new Uint8Array(end - start);
@@ -446,7 +451,7 @@ export class TmuxHub {
 		// starts at its final size; then we pin it (window-size manual for that window only).
 		await this.cmd(`set-option -g default-size ${cols}x${rows}`).catch(() => {});
 		const lines = await this.cmd(
-			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tq(tileId)} -c ${tq(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} -e VIVARIUM_TMUX_SOCKET=${tq(this.socket)}${this.controlSocket ? ` -e VIVARIUM_SOCKET=${tq(this.controlSocket)}` : ""}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
+			`new-window -d -P -F ${tq("#{window_id} #{pane_id}")} -t ${tq(SESSION + ":")} -n ${tqLiteral(tileId)} -c ${tqLiteral(dir)} -e VIVARIUM_TILE=${tq(tileId)} -e VIVARIUM_VAULT=${tq(this.vaultName)} -e VIVARIUM_TMUX_SOCKET=${tq(this.socket)}${this.controlSocket ? ` -e VIVARIUM_SOCKET=${tq(this.controlSocket)}` : ""}${this.pathPrefix ? ` -e PATH=${tq(this.pathPrefix + ":" + this.env().PATH)}` : ""} ${tq(launch.command)}`,
 		);
 		const [windowId, paneId] = (lines[0] ?? "").split(" ");
 		// Pin this window's size, so a terminal attaching to it (`vivarium attach`) doesn't resize it.

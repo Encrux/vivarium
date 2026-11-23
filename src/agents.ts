@@ -86,6 +86,7 @@ export function installCli() {
 		}
 	if (current === target) return;
 	if (current === null && fs.existsSync(LOCAL_LINK)) return; // a real file of yours: leave it
+	if (current !== null && !current.includes("vivarium")) return; // a link of yours to something else
 	try {
 		fs.mkdirSync(path.dirname(LOCAL_LINK), { recursive: true });
 		if (current !== null) fs.unlinkSync(LOCAL_LINK); // an old or dangling vivarium link
@@ -142,7 +143,8 @@ export function syncSkill(on: boolean): string[] {
 export function syncCodexRules(on: boolean) {
 	const file = path.join(os.homedir(), ".codex", "rules", "vivarium.rules");
 	try {
-		if (on) writeIfChanged(file, CODEX_RULES);
+		const theirs = fs.existsSync(file) && !fs.readFileSync(file, "utf8").includes("Written by the Vivarium plugin");
+		if (on && !theirs) writeIfChanged(file, CODEX_RULES);
 		else if (fs.existsSync(file) && fs.readFileSync(file, "utf8").includes("Written by the Vivarium plugin")) fs.unlinkSync(file);
 	} catch (e) {
 		console.warn("[vivarium] codex rules", e);

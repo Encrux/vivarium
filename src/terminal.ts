@@ -535,7 +535,7 @@ export class TerminalSurface {
 		await this.core.hub.killWindow(this.opts.tileId);
 		this.opts.startLaunch = launch;
 		this.opts.startCwd = cwd;
-		this.opts.consent?.grant(); // you pressed Restart: that's a yes
+		// A tile this device hasn't agreed to run yet shows its Start button (with the command) instead.
 		await this.start();
 	}
 

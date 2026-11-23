@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "minAppVersion": "1.8.7",
   "description": "Run terminals, coding agents and dev servers as live tiles on your canvas. They keep running in tmux when you close Obsidian.",
-  "author": "Daniel Bosch",
+  "author": "Daniel Bösch",
   "authorUrl": "https://github.com/Encrux",
   "isDesktopOnly": true
 }

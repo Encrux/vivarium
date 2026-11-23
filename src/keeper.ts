@@ -69,7 +69,7 @@ export class SessionKeeper {
 
 	snapPath(tileId: string) {
 		const vault = this.core.app.vault.getName().replace(/[^\w.-]+/g, "_");
-		return path.join(os.homedir(), ".vivarium", "snapshots", vault, `${tileId}.ans`);
+		return path.join(os.homedir(), ".vivarium", "snapshots", vault, `${tileId.replace(/[^\w-]/g, "_")}.ans`);
 	}
 
 	/** Remember what each tile is running (only writes when something changed). */
@@ -327,7 +327,7 @@ async function findAgent(rootPid: number, tree: Tree): Promise<Found | null> {
 		if (pid !== rootPid) {
 			try {
 				const d = JSON.parse(fs.readFileSync(path.join(dir, `${pid}.json`), "utf8")) as { sessionId?: unknown } | null;
-				if (typeof d?.sessionId === "string") return { kind: "claude", sessionId: d.sessionId, pid };
+				if (typeof d?.sessionId === "string" && /^[\w-]{8,}$/.test(d.sessionId)) return { kind: "claude", sessionId: d.sessionId, pid };
 			} catch {
 			// best effort
 		}

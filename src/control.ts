@@ -347,7 +347,13 @@ export class ControlServer {
 		const session = str(req.session);
 		if (session && /^[\w-]{8,}$/.test(session)) agent = { kind: req.kind === "claude" ? "claude" : (agent?.kind ?? "codex"), sessionId: session };
 		if (!agent) throw new Error("no Codex or Claude Code conversation found in this tile (Codex only has one after the first message)");
-		const command = resumeCommand(spec?.command.trim() ?? "", agent, true, str(req.prompt) ?? "");
+		// The fork keeps the tile's command-line flags (e.g. a model, or a sandbox setting) only when
+		// an agent forks its own conversation: the call comes from that tile, and the conversation is
+		// the one running there. Otherwise an agent could put another tile's flags, say "no sandbox",
+		// on its own conversation. Without them, the fork starts with the harness's defaults.
+		const own = str(req.from) === id && !!live?.agent && live.agent.sessionId === agent.sessionId && live.agent.kind === agent.kind;
+		const base = own ? (spec?.command.trim() ?? "") : agent.kind;
+		const command = resumeCommand(base, agent, true, str(req.prompt) ?? "");
 		return this.opAdd({ op: "add", command, title: str(req.title) || `${t.file.basename} fork`, cwd: live?.cwd, near: id, nearExplicit: true, label: "fork" });
 	}
 

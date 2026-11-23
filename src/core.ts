@@ -73,6 +73,12 @@ export const DEFAULT_SETTINGS: VivariumSettings = {
 };
 
 /** Contents of a `.term` file. The file is the tile's identity; tmux holds its live state. */
+/**
+ * What a tile id may look like. Vivarium generates them (`t…`, `b…`), but tile files come from the
+ * vault (git, sync), and the id ends up in tmux window names, shell commands and file names.
+ */
+export const TILE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 export interface TileSpec {
 	version: 1;
 	id: string;
@@ -291,7 +297,7 @@ export class VivariumCore {
 	async readSpec(file: TFile): Promise<TileSpec | null> {
 		try {
 			const raw = JSON.parse(await this.app.vault.cachedRead(file)) as Partial<TileSpec> | null;
-			if (!raw || typeof raw.id !== "string") return null;
+			if (!raw || typeof raw.id !== "string" || !TILE_ID.test(raw.id)) return null;
 			return { version: 1, id: raw.id, title: raw.title ?? file.basename, command: raw.command ?? "", cwd: raw.cwd ?? "" };
 		} catch {
 			return null;

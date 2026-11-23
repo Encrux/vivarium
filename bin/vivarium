@@ -223,7 +223,10 @@ function setup(flags) {
 		console.log(`skill    ${tilde(dir)}`);
 	}
 	const rules = path.join(home, ".codex", "rules", "vivarium.rules");
-	if (flags["codex-rules"] && !remove) {
+	const theirs = fs.existsSync(rules) && !fs.readFileSync(rules, "utf8").includes("Written by the Vivarium plugin");
+	if (flags["codex-rules"] && !remove && theirs) {
+		console.log(`kept     ${tilde(rules)} (not written by Vivarium)`);
+	} else if (flags["codex-rules"] && !remove) {
 		fs.mkdirSync(path.dirname(rules), { recursive: true });
 		fs.writeFileSync(rules, CODEX_RULES);
 		console.log(`rule     ${tilde(rules)} (Codex runs ls/me/read/wait/note/fork/move/focus without asking)`);
@@ -280,7 +283,8 @@ function setup(flags) {
 				const id = flags.near || takeId([]);
 				// Codex tells the commands it runs which conversation they belong to.
 				const session = process.env.CODEX_THREAD_ID || undefined;
-				const res = await rpc(flags.vault, { op: "fork", id, session, kind: session ? "codex" : undefined, prompt: pos.join(" "), title: flags.title });
+				// `from`: the tile this runs in. Only a fork of your own conversation keeps your tile's flags.
+				const res = await rpc(flags.vault, { op: "fork", id, from: process.env.VIVARIUM_TILE || undefined, session, kind: session ? "codex" : undefined, prompt: pos.join(" "), title: flags.title });
 				warn(res);
 				return out(res, (r) => r.id);
 			}

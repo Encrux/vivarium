@@ -80,6 +80,10 @@ prompts for safe commands" writes `~/.codex/rules/vivarium.rules`, which lets
 `ls me read wait note fork move focus` run without asking. `add send keys rm` still ask, since they
 start or drive programs.
 
+A fork keeps its tile's command-line flags (a model, a sandbox setting) only when an agent forks its
+own conversation. Forking another tile's conversation starts without them, with the agent's
+defaults, so an agent can't borrow another tile's "no sandbox" flag.
+
 Run `vivarium help` for all commands.
 
 ## Obsidian internals

@@ -492,7 +492,7 @@ class VivariumSettingTab extends PluginSettingTab {
 			{
 				name: "Show previous output",
 				desc: "Saves recent terminal output to ~/.vivarium/snapshots (readable only by you) every 30 seconds, so a tile shows it again after a reboot. Turning it off deletes the saved output.",
-				render: (st) =>
+				render: (st) => void
 					st.addToggle((t) =>
 						t.setValue(s.snapshots).onChange((v) => {
 							s.snapshots = v;
@@ -509,7 +509,7 @@ class VivariumSettingTab extends PluginSettingTab {
 					"Starts tmux in its own systemd scope instead of Obsidian's, so logging out doesn't end your programs. " +
 					(linger === false ? "Also needs lingering, which is off: run `loginctl enable-linger` once. " : linger ? "Lingering is on, so this works. " : "Also needs lingering (`loginctl enable-linger`). ") +
 					"Without it, programs end at logout and start again with Obsidian. Takes effect the next time tmux starts.",
-				render: (st) => st.addToggle((t) => t.setValue(s.ownScope).onChange((v) => ((s.ownScope = v), save()))),
+				render: (st) => void st.addToggle((t) => t.setValue(s.ownScope).onChange((v) => ((s.ownScope = v), save()))),
 			});
 		}
 		return [
@@ -519,7 +519,7 @@ class VivariumSettingTab extends PluginSettingTab {
 					{
 						name: "Program list",
 						desc: "One per line: name | command | working directory (optional). An empty command opens your login shell. Each program gets a command you can bind a hotkey to.",
-						render: (st) =>
+						render: (st) => void
 							st.addTextArea((t) => {
 								t.inputEl.rows = 8;
 								t.inputEl.addClass("vivarium-programs-input");
@@ -538,17 +538,17 @@ class VivariumSettingTab extends PluginSettingTab {
 					{
 						name: "Default working directory",
 						desc: "Where programs start when they don't name one. Empty: the vault folder.",
-						render: (st) => st.addText((t) => t.setPlaceholder("~/code").setValue(s.defaultCwd).onChange((v) => ((s.defaultCwd = v), save()))),
+						render: (st) => void st.addText((t) => t.setPlaceholder("~/code").setValue(s.defaultCwd).onChange((v) => ((s.defaultCwd = v), save()))),
 					},
 					{
 						name: "Keep a shell after the program exits",
 						desc: "For example, quitting Claude Code leaves you at a prompt in the same folder instead of an ended tile.",
-						render: (st) => st.addToggle((t) => t.setValue(s.keepShellAfterExit).onChange((v) => ((s.keepShellAfterExit = v), save()))),
+						render: (st) => void st.addToggle((t) => t.setValue(s.keepShellAfterExit).onChange((v) => ((s.keepShellAfterExit = v), save()))),
 					},
 					{
 						name: "Tile folder",
 						desc: "Where new tile files are created.",
-						render: (st) => st.addText((t) => t.setValue(s.tileFolder).onChange((v) => ((s.tileFolder = v), save()))),
+						render: (st) => void st.addText((t) => t.setValue(s.tileFolder).onChange((v) => ((s.tileFolder = v), save()))),
 					},
 				],
 			},
@@ -560,7 +560,7 @@ class VivariumSettingTab extends PluginSettingTab {
 						desc:
 							"Agents in tiles (Claude Code, Codex, …) get the vivarium command, to open tiles next to themselves, fork their conversation and read other tiles. " +
 							"Installs the command into ~/.vivarium/bin (linked from ~/.local/bin) and a skill into ~/.agents/skills and ~/.claude/skills. Turning it off removes them.",
-						render: (st) =>
+						render: (st) => void
 							st.addToggle((t) =>
 								t.setValue(s.agentIntegration).onChange(async (v) => {
 									await this.plugin.setAgentIntegration(v);
@@ -571,7 +571,7 @@ class VivariumSettingTab extends PluginSettingTab {
 					{
 						name: "Codex: no sandbox prompts for safe commands",
 						desc: "Codex's sandbox blocks the vivarium command, so Codex asks before each use. This lets ls, me, read, wait, note, fork, move and focus run without asking (~/.codex/rules/vivarium.rules). add, send, keys and rm still ask, since they start or drive programs. Needs the setting above.",
-						render: (st) =>
+						render: (st) => void
 							st.setDisabled(!s.agentIntegration).addToggle((t) =>
 								t
 									.setValue(s.codexRules)
@@ -589,21 +589,21 @@ class VivariumSettingTab extends PluginSettingTab {
 			{
 				heading: "Terminal",
 				items: [
-					{ name: "Font size", render: (st) => st.addSlider((sl) => sl.setLimits(8, 24, 1).setValue(s.fontSize).onChange((v) => ((s.fontSize = v), save()))) },
+					{ name: "Font size", render: (st) => void st.addSlider((sl) => sl.setLimits(8, 24, 1).setValue(s.fontSize).onChange((v) => ((s.fontSize = v), save()))) },
 					{
 						name: "Font family",
 						desc: "Empty: Obsidian's monospace font.",
-						render: (st) => st.addText((t) => t.setValue(s.fontFamily).onChange((v) => ((s.fontFamily = v), save()))),
+						render: (st) => void st.addText((t) => t.setValue(s.fontFamily).onChange((v) => ((s.fontFamily = v), save()))),
 					},
 					{
 						name: "Option key as Meta",
 						desc: "Off keeps ⌥ for typing characters like @ { } [ ] on non-US layouts.",
-						render: (st) => st.addToggle((t) => t.setValue(s.optionIsMeta).onChange((v) => ((s.optionIsMeta = v), save()))),
+						render: (st) => void st.addToggle((t) => t.setValue(s.optionIsMeta).onChange((v) => ((s.optionIsMeta = v), save()))),
 					},
 					{
 						name: "Lines restored on reopen",
 						desc: "History repainted from tmux when a tile is reopened. Fewer lines show faster.",
-						render: (st) => st.addText((t) => t.setValue(String(s.restoreLines)).onChange((v) => ((s.restoreLines = Math.max(0, parseInt(v) || 0)), save()))),
+						render: (st) => void st.addText((t) => t.setValue(String(s.restoreLines)).onChange((v) => ((s.restoreLines = Math.max(0, parseInt(v) || 0)), save()))),
 					},
 				],
 			},
@@ -613,12 +613,12 @@ class VivariumSettingTab extends PluginSettingTab {
 					{
 						name: "tmux path",
 						desc: this.plugin.core.tmuxAvailable() ? "Found." : "tmux not found. Install it (brew install tmux, sudo apt install tmux) or enter its path.",
-						render: (st) => st.addText((t) => t.setPlaceholder("/opt/homebrew/bin/tmux").setValue(s.tmuxPath).onChange((v) => ((s.tmuxPath = v), save()))),
+						render: (st) => void st.addText((t) => t.setPlaceholder("/opt/homebrew/bin/tmux").setValue(s.tmuxPath).onChange((v) => ((s.tmuxPath = v), save()))),
 					},
 					{
 						name: "Socket name",
 						desc: `Programs run on the tmux server "-L ${s.socketName}". Attach from any terminal: tmux -L ${s.socketName} attach -t vivarium`,
-						render: (st) => st.addText((t) => t.setValue(s.socketName).onChange((v) => ((s.socketName = v || "vivarium"), save()))),
+						render: (st) => void st.addText((t) => t.setValue(s.socketName).onChange((v) => ((s.socketName = v || "vivarium"), save()))),
 					},
 				],
 			},

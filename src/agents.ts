@@ -17,6 +17,7 @@
  * Optionally (off by default, it's a permission change): a Codex rule that lets the read-only and
  * canvas commands run outside Codex's sandbox without asking (~/.codex/rules/vivarium.rules).
  */
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -153,7 +154,11 @@ export function syncCodexRules(on: boolean) {
 
 /** Linux: whether systemd keeps this user's services running after logout (`loginctl enable-linger`). null = can't tell. */
 export function lingerEnabled(): boolean | null {
-	const user = os.userInfo().username;
-	if (!fs.existsSync("/var/lib/systemd/linger")) return null;
-	return fs.existsSync(`/var/lib/systemd/linger/${user}`);
+	try {
+		// asks about the current user, so no user name needed
+		const v = execFileSync("loginctl", ["show-user", "--property=Linger", "--value"], { encoding: "utf8", timeout: 1000 }).trim();
+		return v === "yes" ? true : v === "no" ? false : null;
+	} catch {
+		return null;
+	}
 }

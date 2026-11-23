@@ -15,9 +15,8 @@
 	contain: strict;
 }
 .markdown-embed .vivarium-embed, .internal-embed.vivarium-embed { height: 420px; display: block; }
-.vivarium-view { padding: 0 !important; }
+.vivarium-view, .workspace-leaf-content .view-content.vivarium-view { padding: 0; }
 .vivarium-term .xterm { height: 100%; }
-.vivarium-term .xterm-viewport { background-color: transparent !important; }
 .vivarium-term .xterm-viewport::-webkit-scrollbar { width: 6px; }
 .vivarium-term .xterm-viewport::-webkit-scrollbar-thumb { background: var(--background-modifier-border); border-radius: 3px; }
 
@@ -40,7 +39,7 @@
 
 /* ---- pickers & toolbar ---- */
 /* Canvas fills toolbar icons (for its page-shaped icons), which hides the >_ glyph. */
-.canvas-card-menu .vivarium-card-menu-button svg { fill: none !important; }
+body .canvas-card-menu .canvas-card-menu-button.vivarium-card-menu-button svg.svg-icon { fill: none; }
 .vivarium-suggest-sub { color: var(--text-faint); }
 .vivarium-programs-input { width: 100%; min-width: 320px; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
 .vivarium-drag-ghost {
@@ -90,7 +89,7 @@
 	background: color-mix(in srgb, var(--background-primary) 80%, transparent);
 }
 /* very far out: cards are specks — group titles (which Canvas keeps screen-sized) carry the overview */
-.vivarium-zoomed-far .vivarium-zoom-label { display: none !important; }
+.vivarium-zoomed-far .vivarium-zoom-label { display: none; } /* after .vivarium-zoomed-out: wins */
 .vivarium-zoomed-out .vivarium-has-label .canvas-icon-placeholder { display: none; }
 
 /* ---- web tiles (real browser in the canvas) ---- */

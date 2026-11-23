@@ -129,6 +129,6 @@ Ideas, not scheduled. Comments welcome on the issues.
 - [How it works](docs/how-it-works.md): architecture, performance, crash recovery, git details, caveats
 - [Contributing](CONTRIBUTING.md): building, testing, releasing
 
-Vivarium is MIT licensed and includes [xterm.js](https://xtermjs.org) (MIT).
+Vivarium is MIT licensed and includes [xterm.js](https://xtermjs.org) (MIT, see [notices](THIRD_PARTY_NOTICES.md)).
 
 <sub>*Inspired by FlutterFlow's <a href="https://campus.flutterflow.io/">Campus</a>. If you're using MacOS, your experience will be much better using Campus</sub>

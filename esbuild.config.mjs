@@ -21,7 +21,7 @@ const ctx = await esbuild.context({
 	outdir,
 	// Credits for what's bundled (MIT requires keeping the notices with the code).
 	banner: {
-		js: "/* Vivarium, MIT License. Includes xterm.js, @xterm/addon-fit and @xterm/addon-web-links: MIT License, Copyright (c) 2017-2019 The xterm.js authors, (c) 2014-2016 SourceLair Private Company, (c) 2012-2013 Christopher Jeffrey. See LICENSE in the source repository. */",
+		js: "/* Vivarium, MIT License. Includes xterm.js, @xterm/addon-fit and @xterm/addon-web-links: MIT License, Copyright (c) 2017-2019 The xterm.js authors, (c) 2014-2016 SourceLair Private Company, (c) 2012-2013 Christopher Jeffrey. See THIRD_PARTY_NOTICES.md in the source repository. */",
 	},
 	plugins: [
 		{
